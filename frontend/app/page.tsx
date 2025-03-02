@@ -58,7 +58,7 @@ export default function Home() {
   };
 
   // Recursively filter out nodes whose name is ".git"
-  const filterDirectoryTree = (node:any) => {
+  const filterDirectoryTree = (node) => {
     if (node.name === ".git") return null;
     const newNode = { ...node };
     if (newNode.children) {
@@ -69,8 +69,7 @@ export default function Home() {
     return newNode;
   };
 
-  // Draw the directory tree. The "spacingFactor" adjusts the gap between nodes,
-  // and "treeScale" adjusts the overall tree layout size.
+  // Draw the directory tree (unchanged).
   const drawRepoDiagram = (directoryTree, spacingFactor, hScale, vScale) => {
     d3.select(svgRepoRef.current).selectAll("*").remove();
 
@@ -144,16 +143,23 @@ Language: ${d.data.language || "Unknown"}`;
     });
   };
 
-  // Draw the database diagram with relationships between tables.
+  // Draw the database diagram with draggable tables and updating relationship lines.
   const drawDatabaseDiagram = (databaseInfo) => {
     d3.select(svgDBRef.current).selectAll("*").remove();
     const svg = d3.select(svgDBRef.current).attr("width", 1600).attr("height", 800);
+
+    // Create a group for relationship lines so they can be updated easily.
+    const linesGroup = svg.append("g").attr("class", "lines-group");
+
     const tableNames = Object.keys(databaseInfo);
     const numTables = tableNames.length;
     const columns = Math.ceil(Math.sqrt(numTables));
     const tableWidth = 250;
     const horizontalSpacing = 50;
     const verticalSpacing = 50;
+
+    // This object will store each table's current position, its relative field offsets,
+    // and a reference to its group.
     const tablePositions = {};
 
     // Group tables into rows.
@@ -184,7 +190,7 @@ Language: ${d.data.language || "Unknown"}`;
       currentY += maxHeight + verticalSpacing;
     });
 
-    // Draw tables and record field positions.
+    // Draw tables and record field positions (relative offsets).
     rows.forEach((row, rowIndex) => {
       row.forEach((table, colIndex) => {
         const x = colIndex * (tableWidth + horizontalSpacing) + 50;
@@ -192,36 +198,61 @@ Language: ${d.data.language || "Unknown"}`;
         const fields = databaseInfo[table];
         const tableNameHeight = 30, columnHeaderHeight = 20, fieldRowHeight = 20;
         const rectHeight = tableNameHeight + columnHeaderHeight + fields.length * fieldRowHeight;
-        const group = svg.append("g").attr("transform", `translate(${x}, ${y})`);
+
+        // Create the table group and attach drag behavior.
+        const group = svg.append("g")
+        .attr("transform", `translate(${x}, ${y})`)
+        .call(
+          d3.drag()
+            .on("start", function (event) {
+              d3.select(this).raise().classed("active", true);
+            })
+            .on("drag", function (event) {
+              d3.select(this).attr("transform", `translate(${event.x}, ${event.y})`);
+              tablePositions[table].x = event.x;
+              tablePositions[table].y = event.y;
+              updateRelationships(); // update and then raise the lines group
+            })
+            .on("end", function (event) {
+              d3.select(this).classed("active", false);
+            })
+        );
+
+        // Draw table rectangle and headers.
         group.append("rect")
           .attr("width", tableWidth)
           .attr("height", rectHeight)
           .attr("fill", "#fff")
           .attr("stroke", "#000");
+
         group.append("text")
           .attr("x", tableWidth / 2)
           .attr("y", tableNameHeight / 2 + 10)
           .attr("text-anchor", "middle")
           .attr("font-weight", "bold")
           .text(table);
+
         group.append("line")
           .attr("x1", 0)
           .attr("y1", tableNameHeight)
           .attr("x2", tableWidth)
           .attr("y2", tableNameHeight)
           .attr("stroke", "#000");
+
         group.append("text")
           .attr("x", 5)
           .attr("y", tableNameHeight + columnHeaderHeight / 2 + 10)
           .attr("font-size", "12px")
           .attr("font-weight", "bold")
           .text("Field");
+
         group.append("text")
           .attr("x", tableWidth / 2)
           .attr("y", tableNameHeight + columnHeaderHeight / 2 + 10)
           .attr("font-size", "12px")
           .attr("font-weight", "bold")
           .text("Type");
+
         group.append("line")
           .attr("x1", tableWidth / 2)
           .attr("y1", tableNameHeight)
@@ -229,7 +260,8 @@ Language: ${d.data.language || "Unknown"}`;
           .attr("y2", rectHeight)
           .attr("stroke", "#000");
 
-        const fieldsPos = [];
+        // Record field relative positions (offsets within the group).
+        const fieldOffsets = [];
         fields.forEach((fieldStr, j) => {
           const tokens = fieldStr.trim().split(/\s+/);
           const fieldName = tokens[0] || "";
@@ -245,35 +277,52 @@ Language: ${d.data.language || "Unknown"}`;
             .attr("y", localY)
             .attr("font-size", "12px")
             .text(fieldType);
-          fieldsPos.push({
+          fieldOffsets.push({
             name: fieldName,
-            x: x + 5,
-            y: y + localY
+            dx: 5, // x-offset within the group
+            dy: localY // y-offset within the group
           });
         });
-        const primaryKey = fieldsPos.find(f => f.name === "ID") || null;
-        tablePositions[table] = { x, y, width: tableWidth, rectHeight, fields: fieldsPos, primaryKey };
+        // Find primary key field (assumed to be named "ID").
+        const primaryField = fieldOffsets.find(f => f.name === "ID") || null;
+        // Store current absolute position and relative offsets.
+        tablePositions[table] = {
+          group,
+          x, // current x (updated on drag)
+          y, // current y (updated on drag)
+          width: tableWidth,
+          rectHeight,
+          fields: fieldOffsets,
+          primaryKey: primaryField
+        };
       });
     });
 
-    // Draw relationship lines (curved Bézier paths) between tables.
-    Object.keys(tablePositions).forEach(sourceTable => {
-      const source = tablePositions[sourceTable];
-      source.fields.forEach(field => {
+    // Draw initial relationship lines.
+    tableNames.forEach(sourceTable => {
+      const sourceInfo = tablePositions[sourceTable];
+      sourceInfo.fields.forEach(field => {
         if (field.name !== "ID" && field.name.endsWith("ID")) {
           const candidate = field.name.slice(0, -2);
-          // Case-insensitive matching for target table.
-          const targetTable = Object.keys(tablePositions).find(t => t.toLowerCase() === candidate.toLowerCase());
+          // Find target table by case-insensitive match.
+          const targetTable = tableNames.find(t => t.toLowerCase() === candidate.toLowerCase());
           if (targetTable && tablePositions[targetTable].primaryKey) {
-            const target = tablePositions[targetTable].primaryKey;
-            const midX = (field.x + target.x) / 2;
-            const d = `M${field.x},${field.y} C${midX},${field.y} ${midX},${target.y} ${target.x},${target.y}`;
-            svg.append("path")
-              .attr("d", d)
+            const targetInfo = tablePositions[targetTable];
+            const sourceX = sourceInfo.x + field.dx;
+            const sourceY = sourceInfo.y + field.dy;
+            const targetX = targetInfo.x + targetInfo.primaryKey.dx;
+            const targetY = targetInfo.y + targetInfo.primaryKey.dy;
+            const midX = (sourceX + targetX) / 2;
+            linesGroup.append("path")
+              .attr("d", `M${sourceX},${sourceY} C${midX},${sourceY} ${midX},${targetY} ${targetX},${targetY}`)
               .attr("stroke", "red")
               .attr("stroke-width", 1.5)
               .attr("fill", "none")
-              .attr("marker-end", "url(#arrow)");
+              .attr("marker-end", "url(#arrow)")
+              .attr("class", "relationship-line")
+              .attr("data-source-table", sourceTable)
+              .attr("data-source-field", field.name)
+              .attr("data-target-table", targetTable);
           }
         }
       });
@@ -281,16 +330,40 @@ Language: ${d.data.language || "Unknown"}`;
 
     // Define an arrow marker.
     svg.append("defs").append("marker")
-      .attr("id", "arrow")
-      .attr("viewBox", "0 0 10 10")
-      .attr("refX", 5)
-      .attr("refY", 5)
-      .attr("markerWidth", 6)
-      .attr("markerHeight", 6)
-      .attr("orient", "auto-start-reverse")
-      .append("path")
-      .attr("d", "M 0 0 L 10 5 L 0 10 z")
-      .attr("fill", "red");
+    .attr("id", "arrow")
+    .attr("viewBox", "0 0 10 10")
+    .attr("refX", 5)
+    .attr("refY", 5)
+    .attr("markerWidth", 6)
+    .attr("markerHeight", 6)
+    .attr("orient", "auto-start-reverse")
+    .append("path")
+    .attr("d", "M 0 0 L 10 5 L 0 10 z")
+    .attr("fill", "red");
+
+    // Function to update relationship lines based on current table positions.
+    function updateRelationships() {
+      svg.selectAll(".relationship-line")
+        .attr("d", function () {
+          const sourceTable = d3.select(this).attr("data-source-table");
+          const sourceFieldName = d3.select(this).attr("data-source-field");
+          const targetTable = d3.select(this).attr("data-target-table");
+          const sourceInfo = tablePositions[sourceTable];
+          const targetInfo = tablePositions[targetTable];
+          const sourceField = sourceInfo.fields.find(f => f.name === sourceFieldName);
+          const targetField = targetInfo.primaryKey;
+          const sourceX = sourceInfo.x + sourceField.dx;
+          const sourceY = sourceInfo.y + sourceField.dy;
+          const targetX = targetInfo.x + targetField.dx;
+          const targetY = targetInfo.y + targetField.dy;
+          const midX = (sourceX + targetX) / 2;
+          return `M${sourceX},${sourceY} C${midX},${sourceY} ${midX},${targetY} ${targetX},${targetY}`;
+        });
+      // Raise the lines group so it always stays on top.
+      linesGroup.raise();
+    }
+    linesGroup.raise();
+
   };
 
   // Draw Git commits.
