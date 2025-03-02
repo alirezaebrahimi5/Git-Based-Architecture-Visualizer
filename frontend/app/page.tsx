@@ -78,7 +78,7 @@ export default function Home() {
   };
 
   // Draw the directory tree (unchanged).
-  const drawRepoDiagram = (directoryTree, spacingFactor, hScale, vScale) => {
+  const drawRepoDiagram = (directoryTree:any, spacingFactor:any, hScale:any, vScale:any) => {
     d3.select(svgRepoRef.current).selectAll("*").remove();
   
     // Base dimensions.
@@ -98,13 +98,13 @@ export default function Home() {
       .attr("transform", `translate(${margin.left},${margin.top})`);
   
     // Enable zooming and panning.
-    const zoom = d3.zoom().scaleExtent([0.5, 2]).on("zoom", (event) => {
+    const zoom:any = d3.zoom().scaleExtent([0.5, 2]).on("zoom", (event) => {
       svg.attr("transform", event.transform);
     });
     d3.select(svgRepoRef.current).call(zoom);
   
     // Create the hierarchy.
-    const root = d3.hierarchy(directoryTree, (d) => d.children);
+    const root:any = d3.hierarchy(directoryTree, (d) => d.children);
     root.x0 = height / 2;
     root.y0 = 0;
   
@@ -116,7 +116,7 @@ export default function Home() {
     let i = 0; // used for node IDs
   
     // Update function: computes layout and renders nodes/links.
-    function update(source) {
+    function update(source:any) {
       const treeLayout = d3
         .tree()
         .size([height, width])
@@ -128,10 +128,10 @@ export default function Home() {
       const links = root.links();
   
       // --- Nodes ---
-      const node = svg.selectAll("g.node").data(nodes, (d) => d.id || (d.id = ++i));
+      const node = svg.selectAll("g.node").data(nodes, (d:any) => d.id || (d.id = ++i));
   
       // Enter new nodes at the parent's previous position.
-      const nodeEnter = node
+      const nodeEnter:any = node
         .enter()
         .append("g")
         .attr("class", "node")
@@ -141,30 +141,30 @@ export default function Home() {
       nodeEnter
         .append("circle")
         .attr("r", 1e-6)
-        .style("fill", (d) => (d._children ? "#555" : "#999"))
+        .style("fill", (d:any) => (d.children ? "#555" : "#999"))
         .style("stroke", "#333")
         .style("stroke-width", "2px");
   
       nodeEnter
         .append("text")
         .attr("dy", ".35em")
-        .attr("x", (d) => (d._children ? -13 : 13))
-        .attr("text-anchor", (d) => (d._children ? "end" : "start"))
+        .attr("x", (d:any) => (d.children ? -13 : 13))
+        .attr("text-anchor", (d:any) => (d.children ? "end" : "start"))
         .style("font-size", "14px")
         .style("user-select", "none")
-        .text((d) => d.data.name);
+        .text((d:any) => d.data.name);
   
       // Transition nodes to their new positions.
       const nodeUpdate = nodeEnter.merge(node);
       nodeUpdate
         .transition()
         .duration(200)
-        .attr("transform", (d) => `translate(${d.y},${d.x})`);
+        .attr("transform", (d:any) => `translate(${d.y},${d.x})`);
   
       nodeUpdate
         .select("circle")
         .attr("r", 8)
-        .style("fill", (d) => (d._children ? "#555" : "#999"));
+        .style("fill", (d:any) => (d.children ? "#555" : "#999"));
   
       // Transition exiting nodes to the parent's new position.
       const nodeExit = node
@@ -177,7 +177,7 @@ export default function Home() {
       nodeExit.select("circle").attr("r", 1e-6);
   
       // --- Links ---
-      const link = svg.selectAll("path.link").data(links, (d) => d.target.id);
+      const link:any = svg.selectAll("path.link").data(links, (d:any) => d.target.id);
   
       // Enter any new links at the parent's previous position.
       const linkEnter = link
@@ -187,7 +187,7 @@ export default function Home() {
         .attr("fill", "none")
         .attr("stroke", "#aaa")
         .attr("stroke-width", "2px")
-        .attr("d", (d) => {
+        .attr("d", (d:any) => {
           const o = { x: source.x0, y: source.y0 };
           return diagonal(o, o);
         });
@@ -197,33 +197,33 @@ export default function Home() {
       linkUpdate
         .transition()
         .duration(200)
-        .attr("d", (d) => diagonal(d.source, d.target));
+        .attr("d", (d:any) => diagonal(d.source, d.target));
   
       // Transition exiting links.
       link
         .exit()
         .transition()
         .duration(200)
-        .attr("d", (d) => {
+        .attr("d", (d:any) => {
           const o = { x: source.x, y: source.y };
           return diagonal(o, o);
         })
         .remove();
   
       // Save the new positions for transition.
-      nodes.forEach((d) => {
+      nodes.forEach((d:any) => {
         d.x0 = d.x;
         d.y0 = d.y;
       });
     }
   
     // Creates a curved (diagonal) path from parent to the child nodes.
-    function diagonal(s, d) {
+    function diagonal(s:any, d:any) {
       return `M ${s.y} ${s.x} C ${(s.y + d.y) / 2} ${s.x}, ${(s.y + d.y) / 2} ${d.x}, ${d.y} ${d.x}`;
     }
   
     // Toggle children on click.
-    function click(event, d) {
+    function click(event:any, d:any) {
       if (d.children) {
         d._children = d.children;
         d.children = null;
@@ -235,7 +235,7 @@ export default function Home() {
     }
   
     // Collapse the node and all its children.
-    function collapse(d) {
+    function collapse(d:any) {
       if (d.children) {
         d._children = d.children;
         d._children.forEach(collapse);
