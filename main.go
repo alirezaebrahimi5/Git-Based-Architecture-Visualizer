@@ -16,11 +16,15 @@ import (
 	"github.com/gorilla/mux"
 )
 
+// FileNode now includes extra properties for files.
 type FileNode struct {
-	Name     string     `json:"name"`
-	Path     string     `json:"path"`
-	IsDir    bool       `json:"isDir"`
-	Children []FileNode `json:"children,omitempty"`
+	Name      string     `json:"name"`
+	Path      string     `json:"path"`
+	IsDir     bool       `json:"isDir"`
+	LineCount int        `json:"lineCount,omitempty"`
+	FileSize  int64      `json:"fileSize,omitempty"`
+	Language  string     `json:"language,omitempty"`
+	Children  []FileNode `json:"children,omitempty"`
 }
 
 type CommitNode struct {
@@ -37,15 +41,48 @@ type BranchInfo struct {
 }
 
 type RepoAnalysis struct {
-	DirectoryTree FileNode            `json:"directoryTree"`
-	GitCommits    []CommitNode        `json:"gitCommits"`
-	Branches      []BranchInfo        `json:"branches"`
-	Files         []string            `json:"files"`
-	Models        map[string]string   `json:"models"`
-	DatabaseInfo  map[string][]string `json:"databaseInfo"`
+	DirectoryTree  FileNode            `json:"directoryTree"`
+	GitCommits     []CommitNode        `json:"gitCommits"`
+	Branches       []BranchInfo        `json:"branches"`
+	Files          []string            `json:"files"`
+	Models         map[string]string   `json:"models"`
+	DatabaseInfo   map[string][]string `json:"databaseInfo"`
+	TotalLineCount int                 `json:"totalLineCount"`
+	FileCount      int                 `json:"fileCount"`
+	LanguageStats  map[string]int      `json:"languageStats"`
 }
 
-// Extract table structures and relationships from model files
+// extensionLanguageMap provides a basic mapping from file extensions to a language name.
+var extensionLanguageMap = map[string]string{
+	".go":   "Go",
+	".js":   "JavaScript",
+	".ts":   "TypeScript",
+	".py":   "Python",
+	".java": "Java",
+	".c":    "C",
+	".cpp":  "C++",
+	".cs":   "C#",
+	".rb":   "Ruby",
+	".php":  "PHP",
+	".html": "HTML",
+	".css":  "CSS",
+	".json": "JSON",
+	".xml":  "XML",
+	".sh":   "Shell",
+	".md":   "Markdown",
+	// Add more mappings as needed.
+}
+
+// countFileLines reads the file and counts the number of newline characters.
+func countFileLines(filePath string) int {
+	content, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return 0
+	}
+	return strings.Count(string(content), "\n")
+}
+
+// extractDatabaseInfo extracts table structures from model files.
 func extractDatabaseInfo(content string) map[string][]string {
 	dbInfo := make(map[string][]string)
 
@@ -87,7 +124,7 @@ func extractDatabaseInfo(content string) map[string][]string {
 	return dbInfo
 }
 
-// Read file content and analyze models
+// analyzeModelFiles reads file content and analyzes models.
 func analyzeModelFiles(filePath string) (string, map[string][]string) {
 	content, err := ioutil.ReadFile(filePath)
 	if err != nil {
@@ -100,7 +137,8 @@ func analyzeModelFiles(filePath string) (string, map[string][]string) {
 	return contentStr, dbInfo
 }
 
-// BuildFileTree and extract models/tables
+// buildFileTree constructs a FileNode tree and collects models and database info.
+// It also collects file size, line count, and language for each file.
 func buildFileTree(rootPath string) (FileNode, map[string]string, map[string][]string, error) {
 	rootNode := FileNode{
 		Name:  filepath.Base(rootPath),
@@ -119,6 +157,7 @@ func buildFileTree(rootPath string) (FileNode, map[string]string, map[string][]s
 		relativePath := strings.TrimPrefix(path, rootPath)
 		relativePath = strings.TrimPrefix(relativePath, string(os.PathSeparator))
 
+		// Skip the root itself
 		if relativePath == "" {
 			return nil
 		}
@@ -129,7 +168,6 @@ func buildFileTree(rootPath string) (FileNode, map[string]string, map[string][]s
 			IsDir: d.IsDir(),
 		}
 
-		// Always explore directories to avoid skipping "internal/models"
 		if d.IsDir() {
 			subTree, subModels, subDBInfo, err := buildFileTree(filepath.Join(rootPath, relativePath))
 			if err != nil {
@@ -143,7 +181,19 @@ func buildFileTree(rootPath string) (FileNode, map[string]string, map[string][]s
 				databaseInfo[k] = v
 			}
 		} else {
-			// Process Go files in "models" directories
+			// For non-directory files, record file size and line count.
+			info, err := d.Info()
+			if err == nil {
+				node.FileSize = info.Size()
+				node.LineCount = countFileLines(path)
+			}
+			// Detect language based on file extension.
+			ext := filepath.Ext(d.Name())
+			if lang, ok := extensionLanguageMap[ext]; ok {
+				node.Language = lang
+			}
+
+			// Process Go files inside any "models" folder for model extraction.
 			if strings.Contains(strings.ToLower(filepath.Dir(path)), "models") && strings.HasSuffix(d.Name(), ".go") {
 				content, dbInfo := analyzeModelFiles(path)
 				models[relativePath] = content
@@ -160,7 +210,29 @@ func buildFileTree(rootPath string) (FileNode, map[string]string, map[string][]s
 	return rootNode, models, databaseInfo, err
 }
 
-// Retrieve Git commits (limit to latest 50)
+// computeAggregates recursively computes total lines, file count, and language stats from a FileNode tree.
+func computeAggregates(node FileNode) (totalLines int, fileCount int, languageStats map[string]int) {
+	languageStats = make(map[string]int)
+	var rec func(n FileNode)
+	rec = func(n FileNode) {
+		if !n.IsDir {
+			fileCount++
+			totalLines += n.LineCount
+			lang := n.Language
+			if lang == "" {
+				lang = "Unknown"
+			}
+			languageStats[lang]++
+		}
+		for _, child := range n.Children {
+			rec(child)
+		}
+	}
+	rec(node)
+	return totalLines, fileCount, languageStats
+}
+
+// getGitCommits retrieves Git commits (limit to latest 50).
 func getGitCommits(repo *git.Repository) ([]CommitNode, error) {
 	commits := []CommitNode{}
 	commitIter, err := repo.Log(&git.LogOptions{})
@@ -192,7 +264,7 @@ func getGitCommits(repo *git.Repository) ([]CommitNode, error) {
 	return commits, nil
 }
 
-// Retrieve branch information
+// getBranches retrieves branch information.
 func getBranches(repo *git.Repository) ([]BranchInfo, error) {
 	branches := []BranchInfo{}
 	refIter, err := repo.Branches()
@@ -212,7 +284,7 @@ func getBranches(repo *git.Repository) ([]BranchInfo, error) {
 	return branches, nil
 }
 
-// Analyze repository and return model details
+// analyzeRepo analyzes the repository and returns model details along with aggregated file info.
 func analyzeRepo(w http.ResponseWriter, r *http.Request) {
 	repoPath := r.URL.Query().Get("repo")
 	if repoPath == "" {
@@ -220,21 +292,24 @@ func analyzeRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Open the repository
+	// Open the repository.
 	repo, err := git.PlainOpen(repoPath)
 	if err != nil {
 		http.Error(w, "Could not open repository", http.StatusInternalServerError)
 		return
 	}
 
-	// Generate the file tree structure and analyze models
+	// Generate the file tree structure (with extra file details).
 	rootNode, models, databaseInfo, err := buildFileTree(repoPath)
 	if err != nil {
 		http.Error(w, "Error reading repository structure", http.StatusInternalServerError)
 		return
 	}
 
-	// Get modified files using Git status
+	// Compute aggregates: total lines, file count, language stats.
+	totalLines, fileCount, languageStats := computeAggregates(rootNode)
+
+	// Get modified files using Git status.
 	wt, err := repo.Worktree()
 	if err != nil {
 		http.Error(w, "Could not access worktree", http.StatusInternalServerError)
@@ -252,7 +327,7 @@ func analyzeRepo(w http.ResponseWriter, r *http.Request) {
 		files = append(files, file)
 	}
 
-	// Retrieve Git commits and branch info
+	// Retrieve Git commits and branch info.
 	commits, err := getGitCommits(repo)
 	if err != nil {
 		http.Error(w, "Could not retrieve git commits", http.StatusInternalServerError)
@@ -266,19 +341,22 @@ func analyzeRepo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	response := RepoAnalysis{
-		DirectoryTree: rootNode,
-		GitCommits:    commits,
-		Branches:      branches,
-		Files:         files,
-		Models:        models,
-		DatabaseInfo:  databaseInfo,
+		DirectoryTree:  rootNode,
+		GitCommits:     commits,
+		Branches:       branches,
+		Files:          files,
+		Models:         models,
+		DatabaseInfo:   databaseInfo,
+		TotalLineCount: totalLines,
+		FileCount:      fileCount,
+		LanguageStats:  languageStats,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
 
-// CORS Middleware
+// corsMiddleware adds CORS headers.
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
