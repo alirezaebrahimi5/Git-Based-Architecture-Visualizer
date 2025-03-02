@@ -1,17 +1,18 @@
-"use client"
-import React, { useEffect, useState } from "react";
+"use client";
+import React, { useEffect, useState, useRef } from "react";
 import * as d3 from "d3";
 
 export default function Home() {
-  const [files, setFiles] = useState([]);
   const [repoPath, setRepoPath] = useState("");
+  const [repoData, setRepoData] = useState(null);
   const [error, setError] = useState(null);
+  const svgRef = useRef(null);
 
   useEffect(() => {
-    if (files.length > 0) {
-      drawGraph();
+    if (repoData) {
+      drawDiagram(repoData.structure);
     }
-  }, [files]);
+  }, [repoData]);
 
   const handleFetch = async () => {
     setError(null);
@@ -21,58 +22,88 @@ export default function Home() {
         throw new Error("Failed to fetch repository data");
       }
       const data = await response.json();
-      setFiles(data.files);
+      setRepoData(data);
     } catch (err) {
       setError(err.message);
     }
   };
 
-  const drawGraph = () => {
-    d3.select("#graph").selectAll("*").remove();
+  const drawDiagram = (structure) => {
+    d3.select(svgRef.current).selectAll("*").remove();
 
-    const width = 800;
-    const height = 600;
+    const width = 1600; // Wider view
+    const height = 800; // Increased height
+    const margin = { top: 40, right: 200, bottom: 50, left: 200 };
 
-    const svg = d3.select("#graph")
-      .append("svg")
+    const svg = d3
+      .select(svgRef.current)
       .attr("width", width)
-      .attr("height", height);
+      .attr("height", height)
+      .append("g")
+      .attr("transform", `translate(${margin.left},${margin.top})`);
 
-    const nodes = files.map((file, index) => ({ id: index, name: file }));
-    const links = [];
+    const zoom = d3.zoom().scaleExtent([0.5, 2]).on("zoom", (event) => {
+      svg.attr("transform", event.transform);
+    });
 
-    const simulation = d3.forceSimulation(nodes)
-      .force("charge", d3.forceManyBody().strength(-50))
-      .force("center", d3.forceCenter(width / 2, height / 2));
+    d3.select(svgRef.current).call(zoom);
 
-    const link = svg.selectAll("line")
-      .data(links)
+    const root = d3.hierarchy(structure, (d) => d.children);
+    const treeLayout = d3.tree().size([height - 100, width - 400]);
+    treeLayout(root);
+
+    const links = svg.selectAll(".link")
+      .data(root.links())
       .enter()
-      .append("line")
-      .style("stroke", "#999");
+      .append("path")
+      .attr("class", "link")
+      .attr("fill", "none")
+      .attr("stroke", "#aaa")
+      .attr("stroke-width", "2px")
+      .attr(
+        "d",
+        d3
+          .linkHorizontal()
+          .x((d) => d.y)
+          .y((d) => d.x)
+      );
 
-    const node = svg.selectAll("circle")
-      .data(nodes)
+    const nodes = svg.selectAll(".node")
+      .data(root.descendants())
       .enter()
-      .append("circle")
-      .attr("r", 5)
-      .style("fill", "#69b3a2");
+      .append("g")
+      .attr("class", "node")
+      .attr("transform", (d) => `translate(${d.y},${d.x})`);
 
-    node.append("title").text(d => d.name);
+    nodes.append("circle")
+      .attr("r", 8)
+      .style("fill", (d) => (d.data.isDir ? "#4CAF50" : "#2196F3"))
+      .style("stroke", "#333")
+      .style("stroke-width", "2px");
 
-    simulation.nodes(nodes).on("tick", () => {
-      node.attr("cx", d => d.x).attr("cy", d => d.y);
-      link
-        .attr("x1", d => d.source.x)
-        .attr("y1", d => d.source.y)
-        .attr("x2", d => d.target.x)
-        .attr("y2", d => d.target.y);
+    nodes.append("text")
+      .attr("dx", (d) => (d.children ? -12 : 12))
+      .attr("dy", 5)
+      .style("font-size", "14px")
+      .style("fill", "#333")
+      .style("user-select", "none")
+      .text((d) => d.data.name);
+
+    nodes.on("click", (event, d) => {
+      if (d.children) {
+        d._children = d.children;
+        d.children = null;
+      } else {
+        d.children = d._children;
+        d._children = null;
+      }
+      drawDiagram(structure);
     });
   };
 
   return (
     <div className="p-4">
-      <h1 className="text-xl font-bold">Git-Based Architecture Visualizer</h1>
+      <h1 className="text-xl font-bold">Git Repository Visualizer</h1>
       <div className="my-4">
         <input
           type="text"
@@ -88,8 +119,15 @@ export default function Home() {
           Analyze Repository
         </button>
       </div>
-      {error && <p className="text-red-500">Error: {error}</p>}
-      <div id="graph" className="border rounded bg-gray-100 w-full h-[600px]"></div>
+      {error && <p className="text-red-500">{error}</p>}
+      {repoData && (
+        <div>
+          <h2 className="text-lg font-bold mt-4">Repository Structure</h2>
+          <div className="overflow-auto border bg-gray-100">
+            <svg ref={svgRef}></svg>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
