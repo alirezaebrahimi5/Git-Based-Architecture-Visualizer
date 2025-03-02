@@ -1,4 +1,4 @@
-![Repository Diagram](https://github.com/alirezaebrahimi5/Git-Based-Architecture-Visualizer/blob/main/media/exp1.png)
+![Repository Diagram](/media/exp1.png)
 
 
 ```markdown
