@@ -2,9 +2,18 @@
 import React, { useEffect, useState, useRef } from "react";
 import * as d3 from "d3";
 
+interface RepoData {
+  totalLineCount: number;
+  fileCount: number;
+  languageStats: Record<string, number>;
+  // Add other properties if needed.
+}
+
+
+
 export default function Home() {
+  const [repoData, setRepoData] = useState<RepoData | null>(null);
   const [repoPath, setRepoPath] = useState("");
-  const [repoData, setRepoData] = useState(null);
   const [error, setError] = useState(null);
 
   // Slider state variables for tree layout adjustments.
@@ -58,19 +67,19 @@ export default function Home() {
   };
 
   // Recursively filter out nodes whose name is ".git"
-  const filterDirectoryTree = (node) => {
+  const filterDirectoryTree = (node:any) => {
     if (node.name === ".git") return null;
     const newNode = { ...node };
     if (newNode.children) {
       newNode.children = newNode.children
         .map(filterDirectoryTree)
-        .filter((child) => child !== null);
+        .filter((child:any) => child !== null);
     }
     return newNode;
   };
 
   // Draw the directory tree (unchanged).
-  const drawRepoDiagram = (directoryTree, spacingFactor, hScale, vScale) => {
+  const drawRepoDiagram = (directoryTree:any, spacingFactor:any, hScale:any, vScale:any) => {
     d3.select(svgRepoRef.current).selectAll("*").remove();
 
     // Base dimensions.
@@ -84,18 +93,18 @@ export default function Home() {
       .append("g")
       .attr("transform", `translate(${margin.left},${margin.top})`);
 
-    const zoom = d3.zoom().scaleExtent([0.5, 2]).on("zoom", (event) => {
+    const zoom = d3.zoom().scaleExtent([0.5, 2]).on("zoom", (event:any) => {
       svg.attr("transform", event.transform);
     });
     d3.select(svgRepoRef.current).call(zoom);
 
-    const root = d3.hierarchy(directoryTree, d => d.children);
+    const root = d3.hierarchy(directoryTree, (d: { children: any; }) => d.children);
     // Adjust horizontal and vertical dimensions separately.
     const adjustedHeight = (baseHeight - 100) * vScale;
     const adjustedWidth = (baseWidth - 400) * hScale;
     const treeLayout = d3.tree()
       .size([adjustedHeight, adjustedWidth])
-      .separation((a, b) => {
+      .separation((a:any, b:any) => {
         return (a.parent === b.parent ? 1 : 1.5) * spacingFactor +
                (Math.max(a.data.name.length, b.data.name.length) * 0.05);
       });
@@ -109,30 +118,30 @@ export default function Home() {
       .attr("fill", "none")
       .attr("stroke", "#aaa")
       .attr("stroke-width", "2px")
-      .attr("d", d3.linkHorizontal().x(d => d.y).y(d => d.x));
+      .attr("d", d3.linkHorizontal().x((d: { y: any; }) => d.y).y((d: { x: any; }) => d.x));
 
     const nodes = svg.selectAll(".node")
       .data(root.descendants())
       .enter()
       .append("g")
       .attr("class", "node")
-      .attr("transform", d => `translate(${d.y},${d.x})`);
+      .attr("transform", (d: { y: any; x: any; }) => `translate(${d.y},${d.x})`);
 
     nodes.append("circle")
       .attr("r", 8)
-      .style("fill", d => d.data.isDir ? "#4CAF50" : "#2196F3")
+      .style("fill", (d: { data: { isDir: any; }; }) => d.data.isDir ? "#4CAF50" : "#2196F3")
       .style("stroke", "#333")
       .style("stroke-width", "2px");
 
     nodes.append("text")
-      .attr("dx", d => d.children ? -12 : 12)
+      .attr("dx", (d: { children: any; }) => d.children ? -12 : 12)
       .attr("dy", 5)
       .style("font-size", "14px")
       .style("fill", "#333")
       .style("user-select", "none")
-      .text(d => d.data.name);
+      .text((d: { data: { name: any; }; }) => d.data.name);
 
-    nodes.append("title").text(d => {
+    nodes.append("title").text((d: { data: { isDir: any; name: any; lineCount: any; fileSize: any; language: any; }; }) => {
       if (!d.data.isDir) {
         return `File: ${d.data.name}
 Lines: ${d.data.lineCount}
@@ -144,7 +153,7 @@ Language: ${d.data.language || "Unknown"}`;
   };
 
   // Draw the database diagram with draggable tables and updating relationship lines.
-  const drawDatabaseDiagram = (databaseInfo) => {
+  const drawDatabaseDiagram = (databaseInfo:any) => {
     d3.select(svgDBRef.current).selectAll("*").remove();
     const svg = d3.select(svgDBRef.current).attr("width", 1600).attr("height", 800);
 
@@ -160,10 +169,10 @@ Language: ${d.data.language || "Unknown"}`;
 
     // This object will store each table's current position, its relative field offsets,
     // and a reference to its group.
-    const tablePositions = {};
+    const tablePositions:any = {};
 
     // Group tables into rows.
-    const rows = [];
+    const rows:any = [];
     tableNames.forEach((table, i) => {
       const rowIndex = Math.floor(i / columns);
       if (!rows[rowIndex]) rows[rowIndex] = [];
@@ -171,7 +180,7 @@ Language: ${d.data.language || "Unknown"}`;
     });
 
     // Pre-calculate table heights.
-    const tableHeights = {};
+    const tableHeights:any = {};
     tableNames.forEach(table => {
       const fields = databaseInfo[table];
       const tableNameHeight = 30, columnHeaderHeight = 20, fieldRowHeight = 20;
@@ -179,11 +188,11 @@ Language: ${d.data.language || "Unknown"}`;
     });
 
     // Calculate dynamic y positions.
-    const rowYPositions = [];
+    const rowYPositions:any = [];
     let currentY = 50;
-    rows.forEach((row, rowIndex) => {
+    rows.forEach((row:any, rowIndex:any) => {
       let maxHeight = 0;
-      row.forEach(table => {
+      row.forEach((table: string | number) => {
         if (tableHeights[table] > maxHeight) maxHeight = tableHeights[table];
       });
       rowYPositions[rowIndex] = currentY;
@@ -191,8 +200,8 @@ Language: ${d.data.language || "Unknown"}`;
     });
 
     // Draw tables and record field positions (relative offsets).
-    rows.forEach((row, rowIndex) => {
-      row.forEach((table, colIndex) => {
+    rows.forEach((row:any, rowIndex:any) => {
+      row.forEach((table:any, colIndex:any) => {
         const x = colIndex * (tableWidth + horizontalSpacing) + 50;
         const y = rowYPositions[rowIndex];
         const fields = databaseInfo[table];
@@ -203,20 +212,21 @@ Language: ${d.data.language || "Unknown"}`;
         const group = svg.append("g")
         .attr("transform", `translate(${x}, ${y})`)
         .call(
-          d3.drag()
-            .on("start", function (event) {
+          d3.drag<SVGGElement, unknown>()
+            .on("start", function (this: SVGGElement, event: any) {
               d3.select(this).raise().classed("active", true);
             })
-            .on("drag", function (event) {
+            .on("drag", function (this: SVGGElement, event: any) {
               d3.select(this).attr("transform", `translate(${event.x}, ${event.y})`);
               tablePositions[table].x = event.x;
               tablePositions[table].y = event.y;
-              updateRelationships(); // update and then raise the lines group
+              updateRelationships(); // update relationship lines
             })
-            .on("end", function (event) {
+            .on("end", function (this: SVGGElement, event: any) {
               d3.select(this).classed("active", false);
             })
         );
+      
 
         // Draw table rectangle and headers.
         group.append("rect")
@@ -261,8 +271,8 @@ Language: ${d.data.language || "Unknown"}`;
           .attr("stroke", "#000");
 
         // Record field relative positions (offsets within the group).
-        const fieldOffsets = [];
-        fields.forEach((fieldStr, j) => {
+        const fieldOffsets:any = [];
+        fields.forEach((fieldStr:any, j:any) => {
           const tokens = fieldStr.trim().split(/\s+/);
           const fieldName = tokens[0] || "";
           const fieldType = tokens[1] || "";
@@ -284,7 +294,7 @@ Language: ${d.data.language || "Unknown"}`;
           });
         });
         // Find primary key field (assumed to be named "ID").
-        const primaryField = fieldOffsets.find(f => f.name === "ID") || null;
+        const primaryField = fieldOffsets.find((f: { name: string; }) => f.name === "ID") || null;
         // Store current absolute position and relative offsets.
         tablePositions[table] = {
           group,
@@ -301,7 +311,7 @@ Language: ${d.data.language || "Unknown"}`;
     // Draw initial relationship lines.
     tableNames.forEach(sourceTable => {
       const sourceInfo = tablePositions[sourceTable];
-      sourceInfo.fields.forEach(field => {
+      sourceInfo.fields.forEach((field: { name: string; dx: any; dy: any; }) => {
         if (field.name !== "ID" && field.name.endsWith("ID")) {
           const candidate = field.name.slice(0, -2);
           // Find target table by case-insensitive match.
@@ -367,11 +377,11 @@ Language: ${d.data.language || "Unknown"}`;
   };
 
   // Draw Git commits.
-  const drawGitCommitsDiagram = (gitCommits) => {
+  const drawGitCommitsDiagram = (gitCommits:any) => {
     d3.select(svgGitCommitsRef.current).selectAll("*").remove();
     const width = 800, rowHeight = 50, height = gitCommits.length * rowHeight + 50;
     const svg = d3.select(svgGitCommitsRef.current).attr("width", width).attr("height", height);
-    gitCommits.forEach((commit, i) => {
+    gitCommits.forEach((commit:any, i:any) => {
       const y = i * rowHeight + 30;
       const group = svg.append("g").attr("transform", `translate(20, ${y})`);
       group.append("circle").attr("r", 8).attr("fill", "#2196F3");
@@ -400,11 +410,11 @@ Language: ${d.data.language || "Unknown"}`;
   };
 
   // Draw branch information.
-  const drawBranchesDiagram = (branches) => {
+  const drawBranchesDiagram = (branches:any) => {
     d3.select(svgBranchesRef.current).selectAll("*").remove();
     const width = 800, rowHeight = 30, height = branches.length * rowHeight + 30;
     const svg = d3.select(svgBranchesRef.current).attr("width", width).attr("height", height);
-    branches.forEach((branch, i) => {
+    branches.forEach((branch:any, i:any) => {
       const y = i * rowHeight + 20;
       const group = svg.append("g").attr("transform", `translate(20, ${y})`);
       group.append("rect")
@@ -483,35 +493,39 @@ Language: ${d.data.language || "Unknown"}`;
           {/* Repository Statistics Section */}
           <h2 className="text-lg font-bold mt-4" style={{ color: "white" }}>Repository Statistics</h2>
           <div className="border bg-gray-100 p-2 mb-4" style={{ color: "black" }}>
-            <p>Total Lines: {repoData.totalLineCount}</p>
-            <p>File Count: {repoData.fileCount}</p>
-            <div>
-              <h3 className="font-bold">Languages Used:</h3>
-              <ul>
-                {Object.entries(repoData.languageStats).map(([lang, count]) => (
-                  <li key={lang}>{lang}: {count}</li>
-                ))}
-              </ul>
+            <div className="border bg-gray-100 p-2 mb-4" style={{ color: "black" }}>
+              <p>Total Lines: {repoData.totalLineCount}</p>
+              <p>File Count: {repoData.fileCount}</p>
+              <div>
+                <h3 className="font-bold">Languages Used:</h3>
+                <ul>
+                  {Object.entries(repoData.languageStats).map(([lang, count]) => (
+                    <li key={lang}>
+                      {lang}: {count}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+            <h2 className="text-lg font-bold mt-4">Directory Tree</h2>
+            <div className="overflow-auto border bg-gray-100">
+              <svg ref={svgRepoRef}></svg>
+            </div>
+            <h2 className="text-lg font-bold mt-4">Database Diagram</h2>
+            <div className="overflow-auto border bg-gray-100">
+              <svg ref={svgDBRef}></svg>
+            </div>
+            <h2 className="text-lg font-bold mt-4">Git Commit History</h2>
+            <div className="overflow-auto border bg-gray-100">
+              <svg ref={svgGitCommitsRef}></svg>
+            </div>
+            <h2 className="text-lg font-bold mt-4">Branches</h2>
+            <div className="overflow-auto border bg-gray-100">
+              <svg ref={svgBranchesRef}></svg>
             </div>
           </div>
-          <h2 className="text-lg font-bold mt-4">Directory Tree</h2>
-          <div className="overflow-auto border bg-gray-100">
-            <svg ref={svgRepoRef}></svg>
-          </div>
-          <h2 className="text-lg font-bold mt-4">Database Diagram</h2>
-          <div className="overflow-auto border bg-gray-100">
-            <svg ref={svgDBRef}></svg>
-          </div>
-          <h2 className="text-lg font-bold mt-4">Git Commit History</h2>
-          <div className="overflow-auto border bg-gray-100">
-            <svg ref={svgGitCommitsRef}></svg>
-          </div>
-          <h2 className="text-lg font-bold mt-4">Branches</h2>
-          <div className="overflow-auto border bg-gray-100">
-            <svg ref={svgBranchesRef}></svg>
-          </div>
         </div>
-      )}
+        )}
     </div>
   );
 }
