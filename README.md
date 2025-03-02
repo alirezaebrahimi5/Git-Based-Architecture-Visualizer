@@ -1,4 +1,5 @@
-Below is an example README.md file that documents both the backend and frontend parts of your project:
+![Repository Diagram](https://example.com/path/to/diagram.png)
+
 
 ```markdown
 # Git Repository Visualizer
@@ -174,6 +175,3 @@ This project is licensed under the MIT License. See the [LICENSE](LICENSE) file 
 - [Gorilla Mux](https://github.com/gorilla/mux)
 - [D3.js](https://d3js.org/)
 - [React](https://reactjs.org/)
-```
-
-This README.md provides a clear overview of your project, instructions on setting up both the backend and frontend, and details on the API endpoints and project structure. Adjust paths, repository URLs, or other details as needed for your environment.
