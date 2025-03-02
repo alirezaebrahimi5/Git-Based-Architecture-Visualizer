@@ -1,4 +1,3 @@
-# docker-compose.yml
 version: '3.8'
 
 services:
@@ -18,5 +17,4 @@ services:
     depends_on:
       - backend
     environment:
-      # You can use this variable in your frontend code (for example, via process.env.REACT_APP_BACKEND_URL)
       - REACT_APP_BACKEND_URL=http://backend:8080

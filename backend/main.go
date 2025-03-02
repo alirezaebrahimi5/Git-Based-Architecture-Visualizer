@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -50,6 +51,7 @@ type RepoAnalysis struct {
 	TotalLineCount int                 `json:"totalLineCount"`
 	FileCount      int                 `json:"fileCount"`
 	LanguageStats  map[string]int      `json:"languageStats"`
+	LLMMermaid     string              `json:"llmMermaid"`
 }
 
 // extensionLanguageMap provides a basic mapping from file extensions to a language name.
@@ -75,7 +77,7 @@ var extensionLanguageMap = map[string]string{
 
 // countFileLines reads the file and counts the number of newline characters.
 func countFileLines(filePath string) int {
-	content, err := ioutil.ReadFile(filePath)
+	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return 0
 	}
@@ -137,8 +139,6 @@ func analyzeModelFiles(filePath string) (string, map[string][]string) {
 	return contentStr, dbInfo
 }
 
-// buildFileTree constructs a FileNode tree and collects models and database info.
-// It also collects file size, line count, and language for each file.
 // buildFileTree constructs a FileNode tree without double-recursing.
 // It also collects models and database info, and records file size, line count, and language.
 func buildFileTree(rootPath string) (FileNode, map[string]string, map[string][]string, error) {
@@ -290,7 +290,57 @@ func getBranches(repo *git.Repository) ([]BranchInfo, error) {
 	return branches, nil
 }
 
-// analyzeRepo analyzes the repository and returns model details along with aggregated file info.
+// generateSummary creates a structured text summary based on the analysis.
+func generateSummary(analysis RepoAnalysis) string {
+	var sb strings.Builder
+	sb.WriteString("Repository Summary:\n")
+	sb.WriteString("The repository contains ")
+	sb.WriteString(string(analysis.FileCount))
+	sb.WriteString(" files with a total of ")
+	sb.WriteString(string(analysis.TotalLineCount))
+	sb.WriteString(" lines.\n")
+	sb.WriteString("Key components detected:\n")
+
+	if len(analysis.Models) > 0 {
+		sb.WriteString("- Model extraction from files in 'models' folders.\n")
+	}
+	if len(analysis.DatabaseInfo) > 0 {
+		sb.WriteString("- Database extraction and table definitions found.\n")
+	}
+	if len(analysis.GitCommits) > 0 {
+		sb.WriteString("- Git commit history analyzed.\n")
+	}
+	if len(analysis.Branches) > 0 {
+		sb.WriteString("- Branch information is available.\n")
+	}
+	if len(analysis.LanguageStats) > 0 {
+		sb.WriteString("- Languages used: ")
+		langs := []string{}
+		for lang, count := range analysis.LanguageStats {
+			langs = append(langs, lang+":"+string(count))
+		}
+		sb.WriteString(strings.Join(langs, ", "))
+		sb.WriteString(".\n")
+	}
+	return sb.String()
+}
+
+// generateMermaidFlowchart crafts a prompt from the repository summary,
+// calls a local LLM via a Python script, and returns the generated Mermaid diagram.
+func generateMermaidFlowchart(summary string) (string, error) {
+	// Craft a prompt.
+	prompt := summary + "\nBased on the above repository analysis, generate a Mermaid flowchart definition that illustrates the main components of the repository. Use the following format:\n\nflowchart LR\n  A[Frontend (React & D3.js)] -->|API Calls| B[Backend (Go)]\n  B --> C[Git Repository Analyzer]\n  B --> D[Database & Model Extraction]\n  B --> E[Git Commit History & Branches]\nOutput only the Mermaid definition."
+
+	// Call the Python script (ensure 'python3' and the script 'generate_mermaid.py' are available in your environment).
+	cmd := exec.Command("python3", "generate_mermaid.py", prompt)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return string(output), nil
+}
+
+// analyzeRepo analyzes the repository and returns model details along with aggregated file info and LLM-generated Mermaid flowchart.
 func analyzeRepo(w http.ResponseWriter, r *http.Request) {
 	repoPath := r.URL.Query().Get("repo")
 	if repoPath == "" {
@@ -346,7 +396,7 @@ func analyzeRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	response := RepoAnalysis{
+	analysis := RepoAnalysis{
 		DirectoryTree:  rootNode,
 		GitCommits:     commits,
 		Branches:       branches,
@@ -358,8 +408,20 @@ func analyzeRepo(w http.ResponseWriter, r *http.Request) {
 		LanguageStats:  languageStats,
 	}
 
+	// Generate a structured summary.
+	summary := generateSummary(analysis)
+
+	// Call the local LLM to generate a Mermaid diagram definition.
+	mermaidDiagram, err := generateMermaidFlowchart(summary)
+	if err != nil {
+		log.Printf("LLM generation error: %v", err)
+		// Optionally continue with empty Mermaid diagram.
+		mermaidDiagram = "LLM Error: " + err.Error()
+	}
+	analysis.LLMMermaid = mermaidDiagram
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	json.NewEncoder(w).Encode(analysis)
 }
 
 // corsMiddleware adds CORS headers.
