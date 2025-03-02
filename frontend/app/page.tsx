@@ -12,7 +12,7 @@ interface RepoData {
 
 
 export default function Home() {
-  const [repoData, setRepoData] = useState<RepoData | null>(null);
+  const [repoData, setRepoData] = useState<any>(null);
   const [repoPath, setRepoPath] = useState("");
   const [error, setError] = useState(null);
 
@@ -26,7 +26,6 @@ export default function Home() {
   const svgDBRef = useRef(null);
   const svgGitCommitsRef = useRef(null);
   const svgBranchesRef = useRef(null);
-
   // Re-draw the directory tree whenever repoData, branchSpacing, or treeScale changes.
   useEffect(() => {
     if (repoData) {
@@ -61,7 +60,7 @@ export default function Home() {
       const data = await response.json();
       setRepoData(data);
       console.log("Fetched Data:", data);
-    } catch (err) {
+    } catch (err:any) {
       setError(err.message);
     }
   };
@@ -93,12 +92,12 @@ export default function Home() {
       .append("g")
       .attr("transform", `translate(${margin.left},${margin.top})`);
 
-    const zoom = d3.zoom().scaleExtent([0.5, 2]).on("zoom", (event:any) => {
+    const zoom:any = d3.zoom().scaleExtent([0.5, 2]).on("zoom", (event:any) => {
       svg.attr("transform", event.transform);
     });
     d3.select(svgRepoRef.current).call(zoom);
 
-    const root = d3.hierarchy(directoryTree, (d: { children: any; }) => d.children);
+    const root:any = d3.hierarchy(directoryTree, (d: { children: any; }) => d.children);
     // Adjust horizontal and vertical dimensions separately.
     const adjustedHeight = (baseHeight - 100) * vScale;
     const adjustedWidth = (baseWidth - 400) * hScale;
@@ -109,7 +108,7 @@ export default function Home() {
                (Math.max(a.data.name.length, b.data.name.length) * 0.05);
       });
     treeLayout(root);
-
+    const link:any = d3.linkHorizontal();
     svg.selectAll(".link")
       .data(root.links())
       .enter()
@@ -118,30 +117,30 @@ export default function Home() {
       .attr("fill", "none")
       .attr("stroke", "#aaa")
       .attr("stroke-width", "2px")
-      .attr("d", d3.linkHorizontal().x((d: { y: any; }) => d.y).y((d: { x: any; }) => d.x));
+      .attr("d", link);
 
     const nodes = svg.selectAll(".node")
       .data(root.descendants())
       .enter()
       .append("g")
       .attr("class", "node")
-      .attr("transform", (d: { y: any; x: any; }) => `translate(${d.y},${d.x})`);
+      .attr("transform", (d: any) => `translate(${d.y},${d.x})`);
 
     nodes.append("circle")
       .attr("r", 8)
-      .style("fill", (d: { data: { isDir: any; }; }) => d.data.isDir ? "#4CAF50" : "#2196F3")
+      .style("fill", (d: any) => d.data.isDir ? "#4CAF50" : "#2196F3")
       .style("stroke", "#333")
       .style("stroke-width", "2px");
 
     nodes.append("text")
-      .attr("dx", (d: { children: any; }) => d.children ? -12 : 12)
+      .attr("dx", (d: any) => d.children ? -12 : 12)
       .attr("dy", 5)
       .style("font-size", "14px")
       .style("fill", "#333")
       .style("user-select", "none")
-      .text((d: { data: { name: any; }; }) => d.data.name);
+      .text((d:any) => d.data.name);
 
-    nodes.append("title").text((d: { data: { isDir: any; name: any; lineCount: any; fileSize: any; language: any; }; }) => {
+    nodes.append("title").text((d:any) => {
       if (!d.data.isDir) {
         return `File: ${d.data.name}
 Lines: ${d.data.lineCount}
@@ -360,7 +359,7 @@ Language: ${d.data.language || "Unknown"}`;
           const targetTable = d3.select(this).attr("data-target-table");
           const sourceInfo = tablePositions[sourceTable];
           const targetInfo = tablePositions[targetTable];
-          const sourceField = sourceInfo.fields.find(f => f.name === sourceFieldName);
+          const sourceField = sourceInfo.fields.find((f: { name: string; }) => f.name === sourceFieldName);
           const targetField = targetInfo.primaryKey;
           const sourceX = sourceInfo.x + sourceField.dx;
           const sourceY = sourceInfo.y + sourceField.dy;
@@ -499,7 +498,7 @@ Language: ${d.data.language || "Unknown"}`;
               <div>
                 <h3 className="font-bold">Languages Used:</h3>
                 <ul>
-                  {Object.entries(repoData.languageStats).map(([lang, count]) => (
+                  {Object.entries(repoData.languageStats).map(([lang, count]:any) => (
                     <li key={lang}>
                       {lang}: {count}
                     </li>
