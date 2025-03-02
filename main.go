@@ -3,13 +3,16 @@ package main
 import (
 	"encoding/json"
 	"io/fs"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/gorilla/mux"
 )
 
@@ -20,11 +23,196 @@ type FileNode struct {
 	Children []FileNode `json:"children,omitempty"`
 }
 
-type RepoAnalysis struct {
-	Structure FileNode `json:"structure"`
-	Files     []string `json:"files"`
+type CommitNode struct {
+	Hash    string   `json:"hash"`
+	Message string   `json:"message"`
+	Author  string   `json:"author"`
+	Date    string   `json:"date"`
+	Parents []string `json:"parents"`
 }
 
+type BranchInfo struct {
+	Name string `json:"name"`
+	Hash string `json:"hash"`
+}
+
+type RepoAnalysis struct {
+	DirectoryTree FileNode            `json:"directoryTree"`
+	GitCommits    []CommitNode        `json:"gitCommits"`
+	Branches      []BranchInfo        `json:"branches"`
+	Files         []string            `json:"files"`
+	Models        map[string]string   `json:"models"`
+	DatabaseInfo  map[string][]string `json:"databaseInfo"`
+}
+
+// Extract table structures and relationships from model files
+func extractDatabaseInfo(content string) map[string][]string {
+	dbInfo := make(map[string][]string)
+
+	// Match Go struct models (GORM-based)
+	goStructPattern := `type\s+(\w+)\s+struct\s+\{([^}]+)\}`
+	reGoStruct := regexp.MustCompile(goStructPattern)
+
+	matches := reGoStruct.FindAllStringSubmatch(content, -1)
+	for _, match := range matches {
+		if len(match) > 2 {
+			tableName := match[1]
+			fields := strings.Split(match[2], "\n")
+			for _, field := range fields {
+				field = strings.TrimSpace(field)
+				if field == "" {
+					continue
+				}
+				dbInfo[tableName] = append(dbInfo[tableName], field)
+			}
+		}
+	}
+
+	// Match SQL tables
+	sqlTablePattern := `CREATE\s+TABLE\s+(\w+)\s*\(([^)]+)\)`
+	reSQLTable := regexp.MustCompile(sqlTablePattern)
+
+	sqlMatches := reSQLTable.FindAllStringSubmatch(content, -1)
+	for _, match := range sqlMatches {
+		if len(match) > 2 {
+			tableName := match[1]
+			fields := strings.Split(match[2], ",")
+			for _, field := range fields {
+				field = strings.TrimSpace(field)
+				dbInfo[tableName] = append(dbInfo[tableName], field)
+			}
+		}
+	}
+
+	return dbInfo
+}
+
+// Read file content and analyze models
+func analyzeModelFiles(filePath string) (string, map[string][]string) {
+	content, err := ioutil.ReadFile(filePath)
+	if err != nil {
+		return "", nil
+	}
+
+	contentStr := string(content)
+	dbInfo := extractDatabaseInfo(contentStr)
+
+	return contentStr, dbInfo
+}
+
+// BuildFileTree and extract models/tables
+func buildFileTree(rootPath string) (FileNode, map[string]string, map[string][]string, error) {
+	rootNode := FileNode{
+		Name:  filepath.Base(rootPath),
+		Path:  rootPath,
+		IsDir: true,
+	}
+
+	models := make(map[string]string)
+	databaseInfo := make(map[string][]string)
+
+	err := filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		relativePath := strings.TrimPrefix(path, rootPath)
+		relativePath = strings.TrimPrefix(relativePath, string(os.PathSeparator))
+
+		if relativePath == "" {
+			return nil
+		}
+
+		node := FileNode{
+			Name:  d.Name(),
+			Path:  relativePath,
+			IsDir: d.IsDir(),
+		}
+
+		// Always explore directories to avoid skipping "internal/models"
+		if d.IsDir() {
+			subTree, subModels, subDBInfo, err := buildFileTree(filepath.Join(rootPath, relativePath))
+			if err != nil {
+				return err
+			}
+			node.Children = subTree.Children
+			for k, v := range subModels {
+				models[k] = v
+			}
+			for k, v := range subDBInfo {
+				databaseInfo[k] = v
+			}
+		} else {
+			// Process Go files in "models" directories
+			if strings.Contains(strings.ToLower(filepath.Dir(path)), "models") && strings.HasSuffix(d.Name(), ".go") {
+				content, dbInfo := analyzeModelFiles(path)
+				models[relativePath] = content
+				for k, v := range dbInfo {
+					databaseInfo[k] = v
+				}
+			}
+		}
+
+		rootNode.Children = append(rootNode.Children, node)
+		return nil
+	})
+
+	return rootNode, models, databaseInfo, err
+}
+
+// Retrieve Git commits (limit to latest 50)
+func getGitCommits(repo *git.Repository) ([]CommitNode, error) {
+	commits := []CommitNode{}
+	commitIter, err := repo.Log(&git.LogOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer commitIter.Close()
+
+	for i := 0; i < 50; i++ {
+		c, err := commitIter.Next()
+		if err != nil {
+			break
+		}
+		commitNode := CommitNode{
+			Hash:    c.Hash.String(),
+			Message: strings.Split(c.Message, "\n")[0],
+			Author:  c.Author.Name,
+			Date:    c.Author.When.Format("2006-01-02 15:04:05"),
+			Parents: func() []string {
+				var p []string
+				for _, parent := range c.ParentHashes {
+					p = append(p, parent.String())
+				}
+				return p
+			}(),
+		}
+		commits = append(commits, commitNode)
+	}
+	return commits, nil
+}
+
+// Retrieve branch information
+func getBranches(repo *git.Repository) ([]BranchInfo, error) {
+	branches := []BranchInfo{}
+	refIter, err := repo.Branches()
+	if err != nil {
+		return nil, err
+	}
+	err = refIter.ForEach(func(ref *plumbing.Reference) error {
+		branches = append(branches, BranchInfo{
+			Name: ref.Name().Short(),
+			Hash: ref.Hash().String(),
+		})
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return branches, nil
+}
+
+// Analyze repository and return model details
 func analyzeRepo(w http.ResponseWriter, r *http.Request) {
 	repoPath := r.URL.Query().Get("repo")
 	if repoPath == "" {
@@ -39,8 +227,8 @@ func analyzeRepo(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Generate the file tree structure
-	rootNode, err := buildFileTree(repoPath)
+	// Generate the file tree structure and analyze models
+	rootNode, models, databaseInfo, err := buildFileTree(repoPath)
 	if err != nil {
 		http.Error(w, "Error reading repository structure", http.StatusInternalServerError)
 		return
@@ -64,64 +252,39 @@ func analyzeRepo(w http.ResponseWriter, r *http.Request) {
 		files = append(files, file)
 	}
 
+	// Retrieve Git commits and branch info
+	commits, err := getGitCommits(repo)
+	if err != nil {
+		http.Error(w, "Could not retrieve git commits", http.StatusInternalServerError)
+		return
+	}
+
+	branches, err := getBranches(repo)
+	if err != nil {
+		http.Error(w, "Could not retrieve branches", http.StatusInternalServerError)
+		return
+	}
+
 	response := RepoAnalysis{
-		Structure: rootNode,
-		Files:     files,
+		DirectoryTree: rootNode,
+		GitCommits:    commits,
+		Branches:      branches,
+		Files:         files,
+		Models:        models,
+		DatabaseInfo:  databaseInfo,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 }
 
-// BuildFileTree recursively generates a tree of the file structure
-func buildFileTree(rootPath string) (FileNode, error) {
-	rootNode := FileNode{
-		Name:  filepath.Base(rootPath),
-		Path:  rootPath,
-		IsDir: true,
-	}
-
-	err := filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-
-		relativePath := strings.TrimPrefix(path, rootPath)
-		relativePath = strings.TrimPrefix(relativePath, string(os.PathSeparator))
-
-		if relativePath == "" {
-			return nil
-		}
-
-		node := FileNode{
-			Name:  d.Name(),
-			Path:  relativePath,
-			IsDir: d.IsDir(),
-		}
-
-		if d.IsDir() {
-			subTree, err := buildFileTree(filepath.Join(rootPath, relativePath))
-			if err != nil {
-				return err
-			}
-			node.Children = subTree.Children
-		}
-
-		rootNode.Children = append(rootNode.Children, node)
-		return nil
-	})
-
-	return rootNode, err
-}
-
-// corsMiddleware adds CORS headers to the HTTP response
+// CORS Middleware
 func corsMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
 
-		// Handle preflight OPTIONS request
 		if r.Method == http.MethodOptions {
 			w.WriteHeader(http.StatusNoContent)
 			return
@@ -135,7 +298,6 @@ func main() {
 	r := mux.NewRouter()
 	r.HandleFunc("/analyze", analyzeRepo).Methods("GET")
 
-	// Apply CORS middleware
 	http.Handle("/", corsMiddleware(r))
 
 	log.Println("Server running on http://localhost:8080")
