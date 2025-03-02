@@ -78,78 +78,175 @@ export default function Home() {
   };
 
   // Draw the directory tree (unchanged).
-  const drawRepoDiagram = (directoryTree:any, spacingFactor:any, hScale:any, vScale:any) => {
+  const drawRepoDiagram = (directoryTree, spacingFactor, hScale, vScale) => {
     d3.select(svgRepoRef.current).selectAll("*").remove();
-
+  
     // Base dimensions.
     const baseWidth = 1600;
     const baseHeight = 800;
     const margin = { top: 40, right: 200, bottom: 50, left: 200 };
-
-    const svg = d3.select(svgRepoRef.current)
+  
+    // Adjust dimensions using scale factors.
+    const width = (baseWidth - 400) * hScale;
+    const height = (baseHeight - 100) * vScale;
+  
+    const svg = d3
+      .select(svgRepoRef.current)
       .attr("width", baseWidth)
       .attr("height", baseHeight)
       .append("g")
       .attr("transform", `translate(${margin.left},${margin.top})`);
-
-    const zoom:any = d3.zoom().scaleExtent([0.5, 2]).on("zoom", (event:any) => {
+  
+    // Enable zooming and panning.
+    const zoom = d3.zoom().scaleExtent([0.5, 2]).on("zoom", (event) => {
       svg.attr("transform", event.transform);
     });
     d3.select(svgRepoRef.current).call(zoom);
-
-    const root:any = d3.hierarchy(directoryTree, (d: { children: any; }) => d.children);
-    // Adjust horizontal and vertical dimensions separately.
-    const adjustedHeight = (baseHeight - 100) * vScale;
-    const adjustedWidth = (baseWidth - 400) * hScale;
-    const treeLayout = d3.tree()
-      .size([adjustedHeight, adjustedWidth])
-      .separation((a:any, b:any) => {
-        return (a.parent === b.parent ? 1 : 1.5) * spacingFactor +
-               (Math.max(a.data.name.length, b.data.name.length) * 0.05);
+  
+    // Create the hierarchy.
+    const root = d3.hierarchy(directoryTree, (d) => d.children);
+    root.x0 = height / 2;
+    root.y0 = 0;
+  
+    // Collapse all nodes initially (except root).
+    if (root.children) {
+      root.children.forEach(collapse);
+    }
+  
+    let i = 0; // used for node IDs
+  
+    // Update function: computes layout and renders nodes/links.
+    function update(source) {
+      const treeLayout = d3
+        .tree()
+        .size([height, width])
+        .separation((a, b) => spacingFactor);
+  
+      treeLayout(root);
+  
+      const nodes = root.descendants();
+      const links = root.links();
+  
+      // --- Nodes ---
+      const node = svg.selectAll("g.node").data(nodes, (d) => d.id || (d.id = ++i));
+  
+      // Enter new nodes at the parent's previous position.
+      const nodeEnter = node
+        .enter()
+        .append("g")
+        .attr("class", "node")
+        .attr("transform", (d) => `translate(${source.y0},${source.x0})`)
+        .on("click", click);
+  
+      nodeEnter
+        .append("circle")
+        .attr("r", 1e-6)
+        .style("fill", (d) => (d._children ? "#555" : "#999"))
+        .style("stroke", "#333")
+        .style("stroke-width", "2px");
+  
+      nodeEnter
+        .append("text")
+        .attr("dy", ".35em")
+        .attr("x", (d) => (d._children ? -13 : 13))
+        .attr("text-anchor", (d) => (d._children ? "end" : "start"))
+        .style("font-size", "14px")
+        .style("user-select", "none")
+        .text((d) => d.data.name);
+  
+      // Transition nodes to their new positions.
+      const nodeUpdate = nodeEnter.merge(node);
+      nodeUpdate
+        .transition()
+        .duration(200)
+        .attr("transform", (d) => `translate(${d.y},${d.x})`);
+  
+      nodeUpdate
+        .select("circle")
+        .attr("r", 8)
+        .style("fill", (d) => (d._children ? "#555" : "#999"));
+  
+      // Transition exiting nodes to the parent's new position.
+      const nodeExit = node
+        .exit()
+        .transition()
+        .duration(200)
+        .attr("transform", (d) => `translate(${source.y},${source.x})`)
+        .remove();
+  
+      nodeExit.select("circle").attr("r", 1e-6);
+  
+      // --- Links ---
+      const link = svg.selectAll("path.link").data(links, (d) => d.target.id);
+  
+      // Enter any new links at the parent's previous position.
+      const linkEnter = link
+        .enter()
+        .insert("path", "g")
+        .attr("class", "link")
+        .attr("fill", "none")
+        .attr("stroke", "#aaa")
+        .attr("stroke-width", "2px")
+        .attr("d", (d) => {
+          const o = { x: source.x0, y: source.y0 };
+          return diagonal(o, o);
+        });
+  
+      // Transition links to their new positions.
+      const linkUpdate = linkEnter.merge(link);
+      linkUpdate
+        .transition()
+        .duration(200)
+        .attr("d", (d) => diagonal(d.source, d.target));
+  
+      // Transition exiting links.
+      link
+        .exit()
+        .transition()
+        .duration(200)
+        .attr("d", (d) => {
+          const o = { x: source.x, y: source.y };
+          return diagonal(o, o);
+        })
+        .remove();
+  
+      // Save the new positions for transition.
+      nodes.forEach((d) => {
+        d.x0 = d.x;
+        d.y0 = d.y;
       });
-    treeLayout(root);
-    const link:any = d3.linkHorizontal();
-    svg.selectAll(".link")
-      .data(root.links())
-      .enter()
-      .append("path")
-      .attr("class", "link")
-      .attr("fill", "none")
-      .attr("stroke", "#aaa")
-      .attr("stroke-width", "2px")
-      .attr("d", link);
-
-    const nodes = svg.selectAll(".node")
-      .data(root.descendants())
-      .enter()
-      .append("g")
-      .attr("class", "node")
-      .attr("transform", (d: any) => `translate(${d.y},${d.x})`);
-
-    nodes.append("circle")
-      .attr("r", 8)
-      .style("fill", (d: any) => d.data.isDir ? "#4CAF50" : "#2196F3")
-      .style("stroke", "#333")
-      .style("stroke-width", "2px");
-
-    nodes.append("text")
-      .attr("dx", (d: any) => d.children ? -12 : 12)
-      .attr("dy", 5)
-      .style("font-size", "14px")
-      .style("fill", "#333")
-      .style("user-select", "none")
-      .text((d:any) => d.data.name);
-
-    nodes.append("title").text((d:any) => {
-      if (!d.data.isDir) {
-        return `File: ${d.data.name}
-Lines: ${d.data.lineCount}
-Size: ${d.data.fileSize} bytes
-Language: ${d.data.language || "Unknown"}`;
+    }
+  
+    // Creates a curved (diagonal) path from parent to the child nodes.
+    function diagonal(s, d) {
+      return `M ${s.y} ${s.x} C ${(s.y + d.y) / 2} ${s.x}, ${(s.y + d.y) / 2} ${d.x}, ${d.y} ${d.x}`;
+    }
+  
+    // Toggle children on click.
+    function click(event, d) {
+      if (d.children) {
+        d._children = d.children;
+        d.children = null;
+      } else {
+        d.children = d._children;
+        d._children = null;
       }
-      return `Directory: ${d.data.name}`;
-    });
+      update(d);
+    }
+  
+    // Collapse the node and all its children.
+    function collapse(d) {
+      if (d.children) {
+        d._children = d.children;
+        d._children.forEach(collapse);
+        d.children = null;
+      }
+    }
+  
+    // Initial update to render the tree.
+    update(root);
   };
+  
 
   // Draw the database diagram with draggable tables and updating relationship lines.
   const drawDatabaseDiagram = (databaseInfo:any) => {

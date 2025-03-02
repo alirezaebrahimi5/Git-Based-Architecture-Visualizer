@@ -139,61 +139,68 @@ func analyzeModelFiles(filePath string) (string, map[string][]string) {
 
 // buildFileTree constructs a FileNode tree and collects models and database info.
 // It also collects file size, line count, and language for each file.
+// buildFileTree constructs a FileNode tree without double-recursing.
+// It also collects models and database info, and records file size, line count, and language.
 func buildFileTree(rootPath string) (FileNode, map[string]string, map[string][]string, error) {
 	rootNode := FileNode{
 		Name:  filepath.Base(rootPath),
-		Path:  rootPath,
+		Path:  "",
 		IsDir: true,
 	}
-
 	models := make(map[string]string)
 	databaseInfo := make(map[string][]string)
 
+	// Walk through all files and directories starting from rootPath.
 	err := filepath.WalkDir(rootPath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-
 		relativePath := strings.TrimPrefix(path, rootPath)
 		relativePath = strings.TrimPrefix(relativePath, string(os.PathSeparator))
-
-		// Skip the root itself
+		// Skip the root itself.
 		if relativePath == "" {
 			return nil
 		}
+		// Split the relative path into parts.
+		parts := strings.Split(relativePath, string(os.PathSeparator))
+		currentNode := &rootNode
 
-		node := FileNode{
-			Name:  d.Name(),
-			Path:  relativePath,
-			IsDir: d.IsDir(),
+		// Traverse (or create) the node for each part.
+		for i, part := range parts {
+			// Check if this part already exists as a child.
+			var child *FileNode
+			for j := range currentNode.Children {
+				if currentNode.Children[j].Name == part {
+					child = &currentNode.Children[j]
+					break
+				}
+			}
+			// If not found, create a new node.
+			if child == nil {
+				newNode := FileNode{
+					Name: part,
+					Path: filepath.Join(currentNode.Path, part),
+					// A node is a directory if it's not the last part or if WalkDir says it’s a directory.
+					IsDir: (i < len(parts)-1) || d.IsDir(),
+				}
+				currentNode.Children = append(currentNode.Children, newNode)
+				child = &currentNode.Children[len(currentNode.Children)-1]
+			}
+			currentNode = child
 		}
 
-		if d.IsDir() {
-			subTree, subModels, subDBInfo, err := buildFileTree(filepath.Join(rootPath, relativePath))
-			if err != nil {
-				return err
-			}
-			node.Children = subTree.Children
-			for k, v := range subModels {
-				models[k] = v
-			}
-			for k, v := range subDBInfo {
-				databaseInfo[k] = v
-			}
-		} else {
-			// For non-directory files, record file size and line count.
+		// For files, record extra details.
+		if !d.IsDir() {
 			info, err := d.Info()
 			if err == nil {
-				node.FileSize = info.Size()
-				node.LineCount = countFileLines(path)
+				currentNode.FileSize = info.Size()
+				currentNode.LineCount = countFileLines(path)
 			}
-			// Detect language based on file extension.
 			ext := filepath.Ext(d.Name())
 			if lang, ok := extensionLanguageMap[ext]; ok {
-				node.Language = lang
+				currentNode.Language = lang
 			}
-
-			// Process Go files inside any "models" folder for model extraction.
+			// If the file is in a "models" folder and is a Go file, process for model extraction.
 			if strings.Contains(strings.ToLower(filepath.Dir(path)), "models") && strings.HasSuffix(d.Name(), ".go") {
 				content, dbInfo := analyzeModelFiles(path)
 				models[relativePath] = content
@@ -203,7 +210,6 @@ func buildFileTree(rootPath string) (FileNode, map[string]string, map[string][]s
 			}
 		}
 
-		rootNode.Children = append(rootNode.Children, node)
 		return nil
 	})
 
