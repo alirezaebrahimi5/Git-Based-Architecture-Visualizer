@@ -409,16 +409,16 @@ func analyzeRepo(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Generate a structured summary.
-	summary := generateSummary(analysis)
+	// summary := generateSummary(analysis)
 
 	// Call the local LLM to generate a Mermaid diagram definition.
-	mermaidDiagram, err := generateMermaidFlowchart(summary)
-	if err != nil {
-		log.Printf("LLM generation error: %v", err)
-		// Optionally continue with empty Mermaid diagram.
-		mermaidDiagram = "LLM Error: " + err.Error()
-	}
-	analysis.LLMMermaid = mermaidDiagram
+	// mermaidDiagram, err := generateMermaidFlowchart(summary)
+	// if err != nil {
+	// 	log.Printf("LLM generation error: %v", err)
+	// 	// Optionally continue with empty Mermaid diagram.
+	// 	mermaidDiagram = "LLM Error: " + err.Error()
+	// }
+	// analysis.LLMMermaid = mermaidDiagram
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(analysis)
