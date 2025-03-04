@@ -15,57 +15,65 @@ interface FieldInfo {
 }
 
 interface TablePosition {
+  table: string;
   x: number;
   y: number;
   width: number;
   rectHeight: number;
   fields: FieldInfo[];
   primaryKey: { name: string; dx: number; dy: number } | null;
-  group: any;
-}
-
-interface RelationData {
-  sourceTable: string;
-  targetTable: string;
-  sourceX: number;
-  sourceY: number;
-  targetX: number;
-  targetY: number;
-  fields: string[];
+  group: SVGGElement | null;
 }
 
 const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
-  const svgDBRef = useRef<SVGSVGElement>(null);
+  const svgRef = useRef<SVGSVGElement>(null);
+  // We'll store table positions in a mutable object.
+  const tablePositions: Record<string, TablePosition> = {};
 
   useEffect(() => {
     if (!databaseInfo) return;
-    // Clear any previous content.
-    d3.select(svgDBRef.current).selectAll("*").remove();
+    // Clear previous content.
+    d3.select(svgRef.current).selectAll("*").remove();
 
-    // Create svg with viewBox and zoom/pan support.
+    // Basic dimensions.
+    const width = 1600;
+    const height = 1200;
+
+    // Create the SVG element.
     const svg = d3
-      .select(svgDBRef.current)
-      .attr("width", 1600)
-      .attr("height", 800)
-      .attr("viewBox", "0 0 1600 800")
+      .select(svgRef.current)
+      .attr("width", width)
+      .attr("height", height)
+      .attr("viewBox", `0 0 ${width} ${height}`)
       .attr("preserveAspectRatio", "xMidYMid meet");
-    const zoom:any = d3.zoom().scaleExtent([0.5, 3]).on("zoom", (event) => {
-      svg.attr("transform", event.transform);
-    });
-    d3.select(svgDBRef.current).call(zoom);
 
-    // Group for relation lines.
-    const linesGroup = svg.append("g").attr("class", "lines-group");
+    // Create a parent group that contains both tables and relationship lines.
+    const diagramGroup = svg.append("g").attr("class", "diagram-group");
+    // Create two separate groups: one for tables, one for relation lines.
+    const tablesGroup = diagramGroup.append("g").attr("class", "tables-group");
+    const linesGroup = diagramGroup.append("g").attr("class", "lines-group");
 
-    let tableNames = Object.keys(databaseInfo);
+    // Setup d3-zoom on the SVG that transforms the entire diagramGroup.
+    const zoom:any = d3
+      .zoom<SVGSVGElement, unknown>()
+      .scaleExtent([0.5, 3])
+      .translateExtent([[-width, -height], [width * 2, height * 2]])
+      .on("zoom", (event) => {
+        diagramGroup.attr("transform", event.transform);
+      });
+    svg.call(zoom);
+
+    // Layout parameters.
+    const tableNames = Object.keys(databaseInfo);
     const columns = Math.ceil(Math.sqrt(tableNames.length));
     const tableWidth = 250;
+    const tableNameHeight = 30;
+    const columnHeaderHeight = 20;
+    const fieldRowHeight = 20;
     const horizontalSpacing = 50;
     const verticalSpacing = 50;
 
-    const tablePositions: Record<string, TablePosition> = {};
-
-    // Group tables into rows.
+    // Group table names into rows.
     const rows: string[][] = [];
     tableNames.forEach((table, i) => {
       const rowIndex = Math.floor(i / columns);
@@ -73,42 +81,36 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
       rows[rowIndex].push(table);
     });
 
-    // Pre-calculate table heights.
+    // Compute row y positions based on table heights.
     const tableHeights: Record<string, number> = {};
     tableNames.forEach((table) => {
       const fields = databaseInfo[table];
-      const tableNameHeight = 30,
-        columnHeaderHeight = 20,
-        fieldRowHeight = 20;
-      tableHeights[table] = tableNameHeight + columnHeaderHeight + fields.length * fieldRowHeight;
+      tableHeights[table] =
+        tableNameHeight + columnHeaderHeight + fields.length * fieldRowHeight;
     });
-
-    // Calculate y positions for rows.
     const rowYPositions: number[] = [];
     let currentY = 50;
-    rows.forEach((row, rowIndex) => {
+    rows.forEach((row) => {
       let maxHeight = 0;
       row.forEach((table) => {
         if (tableHeights[table] > maxHeight) maxHeight = tableHeights[table];
       });
-      rowYPositions[rowIndex] = currentY;
+      rowYPositions.push(currentY);
       currentY += maxHeight + verticalSpacing;
     });
 
     // Draw tables and record positions.
     rows.forEach((row, rowIndex) => {
-      row.forEach((table, colIndex) => {
-        const x = colIndex * (tableWidth + horizontalSpacing) + 50;
-        const y = rowYPositions[rowIndex];
-        const fields = databaseInfo[table];
-        const tableNameHeight = 30,
-          columnHeaderHeight = 20,
-          fieldRowHeight = 20;
-        const rectHeight = tableNameHeight + columnHeaderHeight + fields.length * fieldRowHeight;
-
-        const group = svg
+      let xOffset = 50;
+      row.forEach((tableName) => {
+        const fields = databaseInfo[tableName];
+        const rectHeight =
+          tableNameHeight + columnHeaderHeight + fields.length * fieldRowHeight;
+        // Append a group for this table inside tablesGroup.
+        const tableGroup = tablesGroup
           .append("g")
-          .attr("transform", `translate(${x}, ${y})`)
+          .attr("class", "table-group")
+          .attr("transform", `translate(${xOffset}, ${rowYPositions[rowIndex]})`)
           .call(
             d3
               .drag<SVGGElement, unknown>()
@@ -117,8 +119,8 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
               })
               .on("drag", function (event) {
                 d3.select(this).attr("transform", `translate(${event.x}, ${event.y})`);
-                tablePositions[table].x = event.x;
-                tablePositions[table].y = event.y;
+                tablePositions[tableName].x = event.x;
+                tablePositions[tableName].y = event.y;
                 updateRelationships();
               })
               .on("end", function () {
@@ -126,30 +128,25 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
               })
           );
 
-        group
+        // Draw table rectangle.
+        tableGroup
           .append("rect")
           .attr("width", tableWidth)
           .attr("height", rectHeight)
           .attr("fill", "#fff")
           .attr("stroke", "#000");
 
-        group
+        // Table name.
+        tableGroup
           .append("text")
           .attr("x", tableWidth / 2)
           .attr("y", tableNameHeight / 2 + 10)
           .attr("text-anchor", "middle")
           .attr("font-weight", "bold")
-          .text(table);
+          .text(tableName);
 
-        group
-          .append("line")
-          .attr("x1", 0)
-          .attr("y1", tableNameHeight)
-          .attr("x2", tableWidth)
-          .attr("y2", tableNameHeight)
-          .attr("stroke", "#000");
-
-        group
+        // Field headings.
+        tableGroup
           .append("text")
           .attr("x", 5)
           .attr("y", tableNameHeight + columnHeaderHeight / 2 + 10)
@@ -157,7 +154,7 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
           .attr("font-weight", "bold")
           .text("Field");
 
-        group
+        tableGroup
           .append("text")
           .attr("x", tableWidth / 2 + 5)
           .attr("y", tableNameHeight + columnHeaderHeight / 2 + 10)
@@ -165,7 +162,16 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
           .attr("font-weight", "bold")
           .text("Type");
 
-        group
+        // Draw header separator lines.
+        tableGroup
+          .append("line")
+          .attr("x1", 0)
+          .attr("y1", tableNameHeight + columnHeaderHeight)
+          .attr("x2", tableWidth)
+          .attr("y2", tableNameHeight + columnHeaderHeight)
+          .attr("stroke", "#000");
+
+        tableGroup
           .append("line")
           .attr("x1", tableWidth / 2)
           .attr("y1", tableNameHeight)
@@ -173,20 +179,22 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
           .attr("y2", rectHeight)
           .attr("stroke", "#000");
 
+        // Collect field information.
         const fieldOffsets: FieldInfo[] = [];
-        fields.forEach((fieldStr, j) => {
+        fields.forEach((fieldStr, index) => {
           const tokens = fieldStr.trim().split(/\s+/);
           const fieldName = tokens[0] || "";
           const fieldType = tokens[1] || "";
           const fieldArgs = tokens.slice(2).join(" ") || "";
-          const localY = tableNameHeight + columnHeaderHeight + j * fieldRowHeight + fieldRowHeight / 1.5;
-          group
+          const localY =
+            tableNameHeight + columnHeaderHeight + index * fieldRowHeight + fieldRowHeight / 1.5;
+          tableGroup
             .append("text")
             .attr("x", 5)
             .attr("y", localY)
             .attr("font-size", "12px")
             .text(fieldName);
-          group
+          tableGroup
             .append("text")
             .attr("x", tableWidth / 2 + 5)
             .attr("y", localY)
@@ -196,32 +204,35 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
             name: fieldName,
             type: fieldType,
             args: fieldArgs,
-            dx: 5,
-            dy: localY,
+            dx: 5, // relative offset from left of table
+            dy: localY, // relative to tableGroup origin
           });
         });
-        // Determine primary key.
-        let primaryField:any = fieldOffsets.find((f) => f.name === "ID");
-        if (!primaryField && fieldOffsets.length > 0) {
-          // Fallback: use a pseudo primary key at the center top.
-          primaryField = { name: "ID", dx: tableWidth / 2, dy: 30 };
+
+        // Determine primary key. If no explicit "ID", use fallback at top-center.
+        let primaryKey:any = fieldOffsets.find((f) => f.name === "ID");
+        if (!primaryKey) {
+          primaryKey = { name: "ID", dx: tableWidth / 2, dy: 20 };
         }
-        tablePositions[table] = {
-          group,
-          x,
-          y,
+
+        tablePositions[tableName] = {
+          table: tableName,
+          group: tableGroup.node() as SVGGElement,
+          x: xOffset,
+          y: rowYPositions[rowIndex],
           width: tableWidth,
           rectHeight,
           fields: fieldOffsets,
-          primaryKey: primaryField,
+          primaryKey,
         };
+
+        xOffset += tableWidth + horizontalSpacing;
       });
     });
 
-    // Draw relationships (foreign keys, one-to-one, many-to-many).
-    tableNames.forEach((sourceTable) => {
-      const sourceInfo = tablePositions[sourceTable];
-      sourceInfo.fields.forEach((field) => {
+    // Draw relationship lines.
+    Object.values(tablePositions).forEach((sourcePos) => {
+      sourcePos.fields.forEach((field) => {
         if (
           field.name !== "ID" &&
           (field.name.endsWith("ID") ||
@@ -244,16 +255,14 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
               }
             }
           }
-          // Look up target table by candidate (case-insensitive)
-          let targetTable = tableNames.find(
-            (t) => t.toLowerCase() === candidate.toLowerCase()
+          // Find target table (case-insensitive).
+          let targetPos = Object.values(tablePositions).find(
+            (pos) => pos.table.toLowerCase() === candidate.toLowerCase()
           );
-          if (!targetTable) {
-            // Create a pseudo node for the missing target.
-            targetTable = candidate;
-            tableNames.push(targetTable);
-            tablePositions[targetTable] = {
-              group: null,
+          if (!targetPos) {
+            // Create pseudo node.
+            targetPos = {
+              table: candidate,
               x: 1300,
               y: 50,
               width: tableWidth,
@@ -266,14 +275,15 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
                 dy: 30,
               }],
               primaryKey: { name: "ID", dx: tableWidth / 2, dy: 30 },
+              group: null,
             };
+            tablePositions[candidate] = targetPos;
           }
-          if (tablePositions[targetTable] && tablePositions[targetTable].primaryKey) {
-            const targetInfo:any = tablePositions[targetTable];
-            const sourceX = sourceInfo.x + field.dx;
-            const sourceY = sourceInfo.y + field.dy;
-            const targetX = targetInfo.x + targetInfo.primaryKey.dx;
-            const targetY = targetInfo.y + targetInfo.primaryKey.dy;
+          if (targetPos && targetPos.primaryKey) {
+            const sourceX = sourcePos.x + field.dx;
+            const sourceY = sourcePos.y + field.dy;
+            const targetX = targetPos.x + targetPos.primaryKey.dx;
+            const targetY = targetPos.y + targetPos.primaryKey.dy;
             const midX = (sourceX + targetX) / 2;
             linesGroup
               .append("path")
@@ -286,18 +296,17 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
               .attr("fill", "none")
               .attr("marker-end", "url(#arrow)")
               .attr("class", "relationship-line")
-              .attr("data-source-table", sourceTable)
+              .attr("data-source-table", sourcePos.table)
               .attr("data-source-field", field.name)
-              .attr("data-target-table", targetTable);
+              .attr("data-target-table", targetPos.table);
           }
         }
       });
     });
 
     // Define arrow marker.
-    svg
-      .append("defs")
-      .append("marker")
+    const defs = diagramGroup.append("defs");
+    defs.append("marker")
       .attr("id", "arrow")
       .attr("viewBox", "0 0 10 10")
       .attr("refX", 5)
@@ -309,29 +318,35 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
       .attr("d", "M 0 0 L 10 5 L 0 10 z")
       .attr("fill", "red");
 
-    // Function to update relation positions on drag.
+    // Update relation positions when tables are dragged.
     function updateRelationships() {
-      svg.selectAll(".relationship-line").attr("d", function () {
-        const sourceTable: any = d3.select(this).attr("data-source-table");
+      linesGroup.selectAll(".relationship-line").attr("d", function () {
+        const sourceTable = d3.select(this).attr("data-source-table");
         const sourceFieldName = d3.select(this).attr("data-source-field");
         const targetTable = d3.select(this).attr("data-target-table");
-        const sourceInfo = tablePositions[sourceTable];
-        const targetInfo = tablePositions[targetTable];
-        const sourceField: any = sourceInfo.fields.find((f) => f.name === sourceFieldName);
-        const targetField: any = targetInfo.primaryKey;
-        const sourceX = sourceInfo.x + sourceField.dx;
-        const sourceY = sourceInfo.y + sourceField.dy;
-        const targetX = targetInfo.x + targetField.dx;
-        const targetY = targetInfo.y + targetField.dy;
+        const sourcePos = tablePositions[sourceTable];
+        const targetPos = tablePositions[targetTable];
+        if (!sourcePos || !targetPos) return "";
+        const sourceField = sourcePos.fields.find((f) => f.name === sourceFieldName);
+        const targetField = targetPos.primaryKey;
+        if (!sourceField || !targetField) return "";
+        const sourceX = sourcePos.x + sourceField.dx;
+        const sourceY = sourcePos.y + sourceField.dy;
+        const targetX = targetPos.x + targetField.dx;
+        const targetY = targetPos.y + targetField.dy;
         const midX = (sourceX + targetX) / 2;
         return `M${sourceX},${sourceY} C${midX},${sourceY} ${midX},${targetY} ${targetX},${targetY}`;
       });
-      linesGroup.raise();
     }
-    linesGroup.raise();
+
+    // Center the diagram initially.
+    const diagramBBox = (diagramGroup.node() as SVGGElement).getBBox();
+    const offsetX = width / 2 - (diagramBBox.x + diagramBBox.width / 2);
+    const offsetY = height / 2 - (diagramBBox.y + diagramBBox.height / 2);
+    svg.call(zoom.transform, d3.zoomIdentity.translate(offsetX, offsetY).scale(0.8));
   }, [databaseInfo]);
 
-  return <svg ref={svgDBRef}></svg>;
+  return <svg ref={svgRef} style={{ width: "100%", height: "100%", background: "#f9f9f9" }} />;
 };
 
 export default DatabaseDiagram;
