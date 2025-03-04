@@ -6,7 +6,8 @@ import (
 	"strings"
 )
 
-// AnalyzeModelFile reads the file at filePath and extracts model and database info.
+// AnalyzeModelFile analyzes a Go file for model definitions (e.g. GORM models)
+// and extracts the file content and database-related info.
 func AnalyzeModelFile(filePath string) (string, map[string][]string) {
 	content, err := ioutil.ReadFile(filePath)
 	if err != nil {
@@ -17,11 +18,11 @@ func AnalyzeModelFile(filePath string) (string, map[string][]string) {
 	return contentStr, dbInfo
 }
 
-// extractDatabaseInfo parses file content for Go struct and SQL table definitions.
+// extractDatabaseInfo parses file content to find Go struct models and SQL table definitions.
 func extractDatabaseInfo(content string) map[string][]string {
 	dbInfo := make(map[string][]string)
 
-	// Match Go struct models (GORM-based).
+	// Regex for Go struct models.
 	goStructPattern := `type\s+(\w+)\s+struct\s+\{([^}]+)\}`
 	reGoStruct := regexp.MustCompile(goStructPattern)
 	matches := reGoStruct.FindAllStringSubmatch(content, -1)
@@ -34,12 +35,13 @@ func extractDatabaseInfo(content string) map[string][]string {
 				if field == "" {
 					continue
 				}
+				// Simply add the field line as is.
 				dbInfo[tableName] = append(dbInfo[tableName], field)
 			}
 		}
 	}
 
-	// Match SQL table definitions.
+	// Regex for SQL table definitions.
 	sqlTablePattern := `CREATE\s+TABLE\s+(\w+)\s*\(([^)]+)\)`
 	reSQLTable := regexp.MustCompile(sqlTablePattern)
 	sqlMatches := reSQLTable.FindAllStringSubmatch(content, -1)
@@ -53,5 +55,6 @@ func extractDatabaseInfo(content string) map[string][]string {
 			}
 		}
 	}
+
 	return dbInfo
 }
