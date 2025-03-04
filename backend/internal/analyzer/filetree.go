@@ -2,10 +2,8 @@ package analyzer
 
 import (
 	"io/fs"
-	"io/ioutil"
 	"os"
 	"path/filepath"
-	"regexp"
 	"strings"
 
 	"alirezaebrahimi5/Git-Based-Architecture-Visualizer/internal/domain"
@@ -97,20 +95,23 @@ func BuildFileTree(rootPath string) (domain.FileNode, map[string]string, map[str
 				}
 			}
 
-			// For Python files, check if they might contain Django models.
+			// For Python files, if the file path contains "models" or the file content contains either "from django.db import models" or "AbstractUser", analyze for Django models.
 			if strings.HasSuffix(d.Name(), ".py") {
 				contentBytes, err := os.ReadFile(path)
 				if err == nil {
 					contentStr := string(contentBytes)
-					// Check for the Django model import.
-					if strings.Contains(contentStr, "from django.db import models") {
+					if strings.Contains(strings.ToLower(path), "models") ||
+						strings.Contains(contentStr, "from django.db import models") ||
+						strings.Contains(contentStr, "AbstractUser") {
 						djangoModels, err := AnalyzeDjangoModels(path)
 						if err == nil && len(djangoModels) > 0 {
-							// Save the entire file content as a model file.
 							models[relativePath] = contentStr
-							// Merge extracted Django models (with fields) into databaseInfo.
 							for modelName, fields := range djangoModels {
-								databaseInfo[modelName] = fields
+								if existing, ok := databaseInfo[modelName]; ok {
+									databaseInfo[modelName] = append(existing, fields...)
+								} else {
+									databaseInfo[modelName] = fields
+								}
 							}
 						}
 					}
@@ -124,64 +125,4 @@ func BuildFileTree(rootPath string) (domain.FileNode, map[string]string, map[str
 	})
 
 	return rootNode, models, databaseInfo, err
-}
-
-// AnalyzeDjangoModels analyzes a Python file for Django model definitions.
-// It returns a map where keys are model names and values are slices of strings
-// representing each field definition in the desired format:
-//
-//	FieldName FieldType FieldArgs
-//
-// This updated version uses (?s) so that field definitions spanning multiple lines
-// (which is common for relational fields) are correctly captured.
-func AnalyzeDjangoModels(filePath string) (map[string][]string, error) {
-	result := make(map[string][]string)
-
-	content, err := ioutil.ReadFile(filePath)
-	if err != nil {
-		return result, err
-	}
-	contentStr := string(content)
-
-	// Regex to match Django model class definitions.
-	reModel := regexp.MustCompile(`(?m)^class\s+(\w+)\s*\(.*models\.Model\):`)
-	modelMatches := reModel.FindAllStringSubmatchIndex(contentStr, -1)
-	if modelMatches == nil {
-		return result, nil
-	}
-
-	// Process each Django model found.
-	for i, match := range modelMatches {
-		modelName := contentStr[match[2]:match[3]]
-		// Determine the block for the model.
-		startBlock := match[1]
-		var endBlock int
-		if i < len(modelMatches)-1 {
-			endBlock = modelMatches[i+1][0]
-		} else {
-			endBlock = len(contentStr)
-		}
-		block := contentStr[startBlock:endBlock]
-
-		// Regex to match field definitions within the model block.
-		// (?s) flag allows the dot to match newlines (to capture multi-line definitions).
-		// This matches lines like:
-		//     field_name = models.FieldType(arg1, arg2, ...)
-		reField := regexp.MustCompile(`(?sm)^\s*(\w+)\s*=\s*models\.([A-Za-z0-9_]+)\((.*?)\)`)
-		fieldMatches := reField.FindAllStringSubmatch(block, -1)
-		var fields []string
-		for _, fieldMatch := range fieldMatches {
-			if len(fieldMatch) >= 4 {
-				fieldName := strings.TrimSpace(fieldMatch[1])
-				fieldType := strings.TrimSpace(fieldMatch[2])
-				args := strings.TrimSpace(fieldMatch[3])
-				// Format the field as: FieldName FieldType FieldArgs
-				fieldDetail := fieldName + " " + fieldType + " " + args
-				fields = append(fields, fieldDetail)
-			}
-		}
-		result[modelName] = fields
-	}
-
-	return result, nil
 }

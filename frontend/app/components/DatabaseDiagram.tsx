@@ -6,20 +6,32 @@ interface DatabaseDiagramProps {
   databaseInfo: Record<string, string[]>;
 }
 
+interface FieldInfo {
+  name: string;
+  type: string;
+  args: string;
+  dx: number;
+  dy: number;
+}
+
 interface TablePosition {
   x: number;
   y: number;
   width: number;
   rectHeight: number;
-  fields: {
-    name: string;
-    type: string;
-    args: string;
-    dx: number;
-    dy: number;
-  }[];
+  fields: FieldInfo[];
   primaryKey: { name: string; dx: number; dy: number } | null;
   group: any;
+}
+
+interface RelationData {
+  sourceTable: string;
+  targetTable: string;
+  sourceX: number;
+  sourceY: number;
+  targetX: number;
+  targetY: number;
+  fields: string[];
 }
 
 const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
@@ -27,15 +39,26 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
 
   useEffect(() => {
     if (!databaseInfo) return;
+    // Clear any previous content.
     d3.select(svgDBRef.current).selectAll("*").remove();
-    const svg = d3.select(svgDBRef.current).attr("width", 1600).attr("height", 800);
 
-    // Group for relationship lines.
+    // Create svg with viewBox and zoom/pan support.
+    const svg = d3
+      .select(svgDBRef.current)
+      .attr("width", 1600)
+      .attr("height", 800)
+      .attr("viewBox", "0 0 1600 800")
+      .attr("preserveAspectRatio", "xMidYMid meet");
+    const zoom:any = d3.zoom().scaleExtent([0.5, 3]).on("zoom", (event) => {
+      svg.attr("transform", event.transform);
+    });
+    d3.select(svgDBRef.current).call(zoom);
+
+    // Group for relation lines.
     const linesGroup = svg.append("g").attr("class", "lines-group");
 
-    const tableNames = Object.keys(databaseInfo);
-    const numTables = tableNames.length;
-    const columns = Math.ceil(Math.sqrt(numTables));
+    let tableNames = Object.keys(databaseInfo);
+    const columns = Math.ceil(Math.sqrt(tableNames.length));
     const tableWidth = 250;
     const horizontalSpacing = 50;
     const verticalSpacing = 50;
@@ -60,7 +83,7 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
       tableHeights[table] = tableNameHeight + columnHeaderHeight + fields.length * fieldRowHeight;
     });
 
-    // Calculate dynamic y positions.
+    // Calculate y positions for rows.
     const rowYPositions: number[] = [];
     let currentY = 50;
     rows.forEach((row, rowIndex) => {
@@ -72,7 +95,7 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
       currentY += maxHeight + verticalSpacing;
     });
 
-    // Draw tables.
+    // Draw tables and record positions.
     rows.forEach((row, rowIndex) => {
       row.forEach((table, colIndex) => {
         const x = colIndex * (tableWidth + horizontalSpacing) + 50;
@@ -98,7 +121,7 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
                 tablePositions[table].y = event.y;
                 updateRelationships();
               })
-              .on("end", function (event) {
+              .on("end", function () {
                 d3.select(this).classed("active", false);
               })
           );
@@ -150,14 +173,7 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
           .attr("y2", rectHeight)
           .attr("stroke", "#000");
 
-        const fieldOffsets: {
-          name: string;
-          type: string;
-          args: string;
-          dx: number;
-          dy: number;
-        }[] = [];
-
+        const fieldOffsets: FieldInfo[] = [];
         fields.forEach((fieldStr, j) => {
           const tokens = fieldStr.trim().split(/\s+/);
           const fieldName = tokens[0] || "";
@@ -184,8 +200,12 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
             dy: localY,
           });
         });
-        // Assume primary key is the field named "ID".
-        const primaryField = fieldOffsets.find((f) => f.name === "ID") || null;
+        // Determine primary key.
+        let primaryField:any = fieldOffsets.find((f) => f.name === "ID");
+        if (!primaryField && fieldOffsets.length > 0) {
+          // Fallback: use a pseudo primary key at the center top.
+          primaryField = { name: "ID", dx: tableWidth / 2, dy: 30 };
+        }
         tablePositions[table] = {
           group,
           x,
@@ -198,11 +218,10 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
       });
     });
 
-    // Draw relationships.
+    // Draw relationships (foreign keys, one-to-one, many-to-many).
     tableNames.forEach((sourceTable) => {
       const sourceInfo = tablePositions[sourceTable];
       sourceInfo.fields.forEach((field) => {
-        // For Django relations, check if field type is a relation type.
         if (
           field.name !== "ID" &&
           (field.name.endsWith("ID") ||
@@ -214,16 +233,42 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
           if (field.name.endsWith("ID")) {
             candidate = field.name.slice(0, -2);
           } else {
-            // Use first token from field.args as candidate.
-            const tokens = field.args.split(/\s+/);
-            if (tokens.length > 0) {
-              candidate = tokens[0].replace(/[,;]/g, "");
+            const toMatch = field.args.match(/to\s*=\s*["']([^"']+)["']/);
+            if (toMatch && toMatch[1]) {
+              const parts = toMatch[1].split(".");
+              candidate = parts.length > 1 ? parts[1] : parts[0];
+            } else {
+              const tokens = field.args.split(/\s+/);
+              if (tokens.length > 0) {
+                candidate = tokens[0].replace(/[,;]/g, "");
+              }
             }
           }
-          const targetTable = tableNames.find(
+          // Look up target table by candidate (case-insensitive)
+          let targetTable = tableNames.find(
             (t) => t.toLowerCase() === candidate.toLowerCase()
           );
-          if (targetTable && tablePositions[targetTable].primaryKey) {
+          if (!targetTable) {
+            // Create a pseudo node for the missing target.
+            targetTable = candidate;
+            tableNames.push(targetTable);
+            tablePositions[targetTable] = {
+              group: null,
+              x: 1300,
+              y: 50,
+              width: tableWidth,
+              rectHeight: 80,
+              fields: [{
+                name: "ID",
+                type: "AutoField",
+                args: "",
+                dx: tableWidth / 2,
+                dy: 30,
+              }],
+              primaryKey: { name: "ID", dx: tableWidth / 2, dy: 30 },
+            };
+          }
+          if (tablePositions[targetTable] && tablePositions[targetTable].primaryKey) {
             const targetInfo:any = tablePositions[targetTable];
             const sourceX = sourceInfo.x + field.dx;
             const sourceY = sourceInfo.y + field.dy;
@@ -249,7 +294,7 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
       });
     });
 
-    // Define an arrow marker.
+    // Define arrow marker.
     svg
       .append("defs")
       .append("marker")
@@ -264,15 +309,16 @@ const DatabaseDiagram: React.FC<DatabaseDiagramProps> = ({ databaseInfo }) => {
       .attr("d", "M 0 0 L 10 5 L 0 10 z")
       .attr("fill", "red");
 
+    // Function to update relation positions on drag.
     function updateRelationships() {
       svg.selectAll(".relationship-line").attr("d", function () {
-        const sourceTable = d3.select(this).attr("data-source-table");
+        const sourceTable: any = d3.select(this).attr("data-source-table");
         const sourceFieldName = d3.select(this).attr("data-source-field");
         const targetTable = d3.select(this).attr("data-target-table");
         const sourceInfo = tablePositions[sourceTable];
         const targetInfo = tablePositions[targetTable];
-        const sourceField:any = sourceInfo.fields.find((f) => f.name === sourceFieldName);
-        const targetField:any = targetInfo.primaryKey;
+        const sourceField: any = sourceInfo.fields.find((f) => f.name === sourceFieldName);
+        const targetField: any = targetInfo.primaryKey;
         const sourceX = sourceInfo.x + sourceField.dx;
         const sourceY = sourceInfo.y + sourceField.dy;
         const targetX = targetInfo.x + targetField.dx;
