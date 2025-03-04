@@ -23,7 +23,7 @@ RUN pip3 install transformers torch
 COPY --from=builder /app/server .
 
 # Copy the generate_mermaid.py script into the container.
-COPY generate_mermaid.py .
+COPY internal/llm/generate_mermaid.py .
 
 EXPOSE 8080
 CMD ["./server"]
