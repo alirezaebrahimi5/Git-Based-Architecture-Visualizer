@@ -79,12 +79,10 @@ def documents_loader(data_path, data_types, chunk_size):
             # Clone
             loader = GithubFileLoader(
                 repo=data_path,  # the repo name
-                branch="main",  # the branch name
+                branch="master",  # the branch name
                 access_token=os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN"),
                 github_api_url="https://api.github.com",
-                file_filter=lambda file_path: file_path.endswith(
-                    ".py"
-                ),  # load all markdowns and python files.
+                file_filter=lambda file_path: file_path.endswith(".py") or file_path.endswith(".md"),  # load all markdowns and python files.
             )
 
         if loader is not None:
