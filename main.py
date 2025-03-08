@@ -1,7 +1,13 @@
 from utils import get_prompt, get_vectorstores, SoftwareArchitectureAgent
 from langchain_openai import ChatOpenAI, OpenAI, OpenAIEmbeddings
 import os
+from langchain.chains import LLMChain
+from langchain_core.output_parsers import BaseOutputParser
+from langchain_core.prompts import ChatPromptTemplate
+from typing import List
 from langchain.chains import HypotheticalDocumentEmbedder
+from langchain.retrievers import MultiQueryRetriever
+from langchain.chat_models import init_chat_model
 
 os.environ[
     "OPENAI_API_KEY"] = "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"
@@ -12,6 +18,15 @@ os.environ["GITHUB_PERSONAL_ACCESS_TOKEN"] = "github_pat_11AQTT3XY0k1QBE3iSD4mY_
 os.environ["LANGCHAIN_TRACING_V2"] = "true"
 os.environ["LANGCHAIN_ENDPOINT"] = "https://api.smith.langchain.com"
 os.environ["LANGCHAIN_PROJECT"] = 'default'
+os.environ["TAVILY_API_KEY"] = "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"
+
+# Output parser will split the LLM result into a list of queries
+class LineListOutputParser(BaseOutputParser[List[str]]):
+    """Output parser for a list of lines."""
+
+    def parse(self, text: str) -> List[str]:
+        lines = text.strip().split("\n")
+        return list(filter(None, lines))  # Remove empty lines
 
 
 class SoftwareAgent:
@@ -31,6 +46,8 @@ class SoftwareAgent:
         self.loader = None
         self.results = None
         self.model_type = llm_model
+        self.chat_model = ChatOpenAI(model_name=self.model_type, temperature=0, streaming=True)
+        self.chat_model = init_chat_model("openai:o3-mini", temperature=0)
         self.text_splitter = None
         self.model = None
         self.temperature = 0.1
@@ -40,8 +57,8 @@ class SoftwareAgent:
         self.chat_history = []
         self.vectorstore_name = vectorstore_name
         self.create_db = False
-        self.database_collection_name = "github_agent"
-        self.chunk_size = 5000
+        self.database_collection_name = "rag_langchain_github_agent2"
+        self.chunk_size = 15000
         self.embeddings_model = embeddings_model
         self.data_path = data_path
         self.data_types = data_types
@@ -59,7 +76,7 @@ class SoftwareAgent:
                                         self.database_collection_name, self.chunk_size, self.create_db)
 
         # Initialize AgenticRAG chain with the retriever tool
-        self.chain = SoftwareArchitectureAgent(vector_store.as_retriever(), self.model_type)
+        self.chain = SoftwareArchitectureAgent(vector_store.as_retriever(search_kwargs={"k": 45}), self.model_type)
         # self.chain.create_graph()
 
     def _select_embeddings_model(self):
@@ -94,11 +111,11 @@ if __name__ == "__main__":
     """
     Main function to run Langchain Model.
     """
-    directory, model_type, vectorstore, file_formats = 'Vargha-Kh/FitFusion', 'gpt-4o-mini', 'weaviate', ['github']
+    directory, model_type, vectorstore, file_formats = 'Vargha-Kh/Langchain-RAG-DevelopmentKit', 'gpt-4o', 'weaviate', ['github']
     # Langchain model init
     software_agent_model = SoftwareAgent(llm_model=model_type, data_path=directory, data_types=file_formats,
                                          vectorstore_name=vectorstore)
     software_agent_model.model_chain_init()
     while True:
         query = input("Please ask your question! ")
-        print(software_agent_model.query_inferences(query, "412"))
+        software_agent_model.query_inferences(query, "412")
