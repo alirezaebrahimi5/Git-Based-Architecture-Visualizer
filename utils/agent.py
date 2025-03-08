@@ -401,7 +401,7 @@ class SoftwareArchitectureAgent:
                 saved_files.append(file_name)
             message = f"Code generated and saved to files: {', '.join(saved_files)}"
             print(message)
-            return {"status": "acceptable", "generated_code": message}
+            return {"status": "acceptable", "generated_code": reflection}
         else:
             print("Revision needed back to planning")
             current_feedback = state.get("reflection_feedback", [])
